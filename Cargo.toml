@@ -1,0 +1,19 @@
+[package]
+name = "ray_otami"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytemuck = "1.7.3"
+cgmath = "0.18.0"
+color-eyre = "0.5.11"
+futures = "0.3.18"
+sdl2 = {version = "0.35.1", features = ["raw-window-handle"]}
+wgpu = {version = "0.11.0", features = ["spirv"]}
+env_logger = "0.9"
+rayon = "1.5.1"
+rand = "0.8.4"
+rand_distr = "0.4.2"
+crossbeam = "0.8.1"

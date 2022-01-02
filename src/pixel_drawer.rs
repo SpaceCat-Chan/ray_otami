@@ -6,7 +6,7 @@ use std::{
 
 use cgmath::prelude::*;
 use rand_distr::Distribution;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
 pub struct Metadata {
     pub color: cgmath::Vector3<f64>,
@@ -210,49 +210,35 @@ pub fn render_ray(
     if ray.hit_anything {
         let metadata = world.get_closest_metadata(ray.position);
         if depth == world.max_ray_depth {
-            return metadata.emitance + world.sky_color;
+            return metadata.emitance;
         }
-        //send some new rays, get diffuse and specular weight for each, average all based on weights
+        //send a new ray, get diffuse and specular weight, do math
         let dist = rand_distr::UnitSphere;
         let normal = world.get_distance_gradient(ray.position).normalize();
         let rotation = cgmath::Basis3::between_vectors(cgmath::vec3(0.0, 1.0, 0.0), normal);
-        let dirs = dist
-            .sample_iter(&mut rand::thread_rng())
-            .take(world.ray_reflections)
-            .map(|[x, y, z]: [f64; 3]| cgmath::vec3(x, y.abs(), z))
-            .map(|v| rotation.rotate_vector(v))
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|dir| {
-                (
-                    dir,
-                    render_ray(ray.previous_position, dir, world, depth + 1),
-                )
-            })
-            .collect::<Vec<_>>();
+
+        let ray_dir: [f64; 3] = dist.sample(&mut rand::thread_rng());
+        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
+        let ray_dir = rotation.rotate_vector(ray_dir);
+        let ray_color = render_ray(ray.previous_position, ray_dir, world, depth + 1);
 
         let f0 = cgmath::vec3(0.04, 0.04, 0.04);
         let f0 = f0.lerp(metadata.color, metadata.metalness);
-        let mut sum = cgmath::vec3(0.0, 0.0, 0.0);
-        let len = dirs.len();
-        for (ray_dir, ray_color) in dirs {
-            let halfway = (ray_dir - direction).normalize();
-            let f = fresnel_schlick(normal.dot(halfway).max(0.0), f0);
-            let ndf = distribution_ggx(normal, halfway, metadata.roughness);
-            let g = geometry_smith(normal, -direction, ray_dir, metadata.roughness);
-            let specular = (ndf * g * f)
-                / (4.0 * normal.dot(-direction).max(0.0) * normal.dot(ray_dir).max(0.0) + 0.000001);
-            let k_d = f.map(|x| 1.0 - x);
-            let k_d = k_d * (1.0 - metadata.metalness);
-            sum += (k_d.mul_element_wise(metadata.color) / std::f64::consts::PI + specular)
-                .mul_element_wise(ray_color)
-                * normal.dot(ray_dir).max(0.0)
-                * 10.0
-        }
-        sum /= len as f64;
-        sum + metadata.emitance
+        let halfway = (ray_dir - direction).normalize();
+        let f = fresnel_schlick(normal.dot(halfway).max(0.0), f0);
+        let ndf = distribution_ggx(normal, halfway, metadata.roughness);
+        let g = geometry_smith(normal, -direction, ray_dir, metadata.roughness);
+        let specular = (ndf * g * f)
+            / (4.0 * normal.dot(-direction).max(0.0) * normal.dot(ray_dir).max(0.0) + 0.000001);
+        let k_d = f.map(|x| 1.0 - x);
+        let k_d = k_d * (1.0 - metadata.metalness);
+        (k_d.mul_element_wise(metadata.color) / std::f64::consts::PI + specular)
+            .mul_element_wise(ray_color)
+            * normal.dot(ray_dir).max(0.0)
+            * 10.0
+            + metadata.emitance
     } else {
-        world.sky_color
+        BLACK
     }
 }
 
@@ -260,60 +246,53 @@ pub fn render_pixel(
     (width, height): (u32, u32),
     pixel_idx: u32,
     world: &World,
-) -> (u8, u8, u8, u8) {
+) -> (f64, f64, f64, f64) {
     let pixel_pos = (pixel_idx % width, pixel_idx / width);
     let pixel_pos = (
         (pixel_pos.0 as f64 / width as f64 - 0.5) * 2.0,
         (pixel_pos.1 as f64 / height as f64 - 0.5) * 2.0,
     );
 
-    let mut color = render_ray(
+    let color = render_ray(
         cgmath::point3(0.0, 0.0, 0.0),
         cgmath::vec3(pixel_pos.0, pixel_pos.1, 1.0).normalize(),
         world,
         0,
     );
-    color.div_assign_element_wise(color.map(|x| x + 1.0));
-    (
-        (color.x * 255.0) as u8,
-        (color.y * 255.0) as u8,
-        (color.z * 255.0) as u8,
-        255,
-    )
+    //color.div_assign_element_wise(color.map(|x| x + 1.0));
+    (color.x, color.y, color.z, 1.0)
 }
 
 pub fn render_to_buffer(buffer: Arc<Mutex<Vec<u8>>>, (width, height): (u32, u32), world: &World) {
-    let (mut sender, mut reciever) = futures::channel::mpsc::unbounded::<(usize, [u8; 4])>();
+    let (mut sender, mut reciever) = futures::channel::mpsc::unbounded::<(usize, [f64; 4])>();
     let reciever = spawn(move || {
-        let mut written_count = 0;
+        let mut ray_count = vec![0usize; (width * height) as usize];
+        let mut actual_buffer = vec![0f64; (width * height * 4) as usize];
         'outer: loop {
             if let Ok(mut lock) = buffer.lock() {
-                loop {
-                    let r = reciever.try_next();
-                    match r {
-                        Ok(Some((index, val))) => {
-                            for (n, item) in val.iter().enumerate() {
-                                lock.deref_mut()[index * 4 + n] = *item;
-                            }
-                            written_count += 1;
-                            if written_count % 100 == 0 {
-                                println!(
-                                    "{:.2}% ({} of {})",
-                                    (written_count as f64 / (width * height) as f64) * 100.0,
-                                    written_count,
-                                    width * height
-                                );
-                            }
+                let r = reciever.try_next();
+                match r {
+                    Ok(Some((index, val))) => {
+                        ray_count[index] += 1;
+                        let ray_count = ray_count[index] as f64;
+                        for (n, item) in val.iter().enumerate() {
+                            let old_val = actual_buffer[index * 4 + n];
+                            let new_val = (item + old_val * (ray_count - 1.0)) / ray_count;
+                            actual_buffer[index * 4 + n] = new_val;
+                            let new_val = new_val / (new_val + 1.0);
+                            lock.deref_mut()[index * 4 + n] = (new_val * 255.0) as u8;
                         }
-                        Ok(None) => break 'outer,
-                        Err(_) => break,
                     }
+                    Ok(None) => break 'outer,
+                    Err(_) => continue,
                 }
             }
         }
     });
-    (0..(width * height))
-        .into_par_iter()
+    (0..)
+        .into_iter()
+        .par_bridge()
+        .map(|p| p % (width * height))
         .map(|pos| (pos, render_pixel((width, height), pos, world)))
         .map(|(pos, (b, g, r, a))| (pos as usize, [r, g, b, a]))
         .for_each(|a| sender.unbounded_send(a).unwrap());

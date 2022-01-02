@@ -54,45 +54,50 @@ fn runner() -> color_eyre::Result<()> {
     surface.configure(&device, &surface_config);
 
     let world = pixel_drawer::World {
-        max_ray_depth: 1,
-        ray_reflections: 100,
+        max_ray_depth: 4,
+        ray_reflections: 1,
         sky_color: cgmath::vec3(0.529, 0.808, 0.98),
         objects: vec![
-            pixel_drawer::Object::Max(
-                Box::new(pixel_drawer::Object::PosModulo(
-                    Box::new(pixel_drawer::Object::Sphere {
-                        center: cgmath::point3(4.0, 2.0, 2.0),
-                        radius: 0.5,
-                        metadata: pixel_drawer::Metadata {
-                            color: cgmath::vec3(1.0, 1.0, 0.0),
-                            emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                            metalness: 0.0,
-                            roughness: 0.0,
-                        },
-                    }),
-                    5.0,
-                )),
-                Box::new(pixel_drawer::Object::Box {
-                    lower_corner: cgmath::point3(-50.0, -50.0, -5.0),
-                    upper_corner: cgmath::point3(50.0, 50.0, 50.0),
-                    metadata: pixel_drawer::Metadata {
-                        color: cgmath::vec3(1.0, 1.0, 0.0),
-                        emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                        metalness: 0.0,
-                        roughness: 0.0,
-                    },
-                }),
-            ), /*,
-               pixel_drawer::Object::Sphere {
-                   center: cgmath::point3(0.5, 0.0, 1.0),
-                   radius: 0.25,
-                   metadata: pixel_drawer::Metadata {
-                       color: cgmath::vec3(0.0, 0.0, 0.0),
-                       emitance: cgmath::vec3(100.0, 100.0, 100.0),
-                       metalness: 0.0,
-                       roughness: 0.0,
-                   },
-               },*/
+            pixel_drawer::Object::Sphere {
+                center: cgmath::point3(0.0, 0.0, 2.0),
+                radius: 0.5,
+                metadata: pixel_drawer::Metadata {
+                    color: cgmath::vec3(1.0, 1.0, 0.0),
+                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
+                    metalness: 0.0,
+                    roughness: 0.1,
+                },
+            },
+            pixel_drawer::Object::Box {
+                lower_corner: cgmath::point3(-5.0, -5.0, 5.0),
+                upper_corner: cgmath::point3(5.0, 5.0, 5.5),
+                metadata: pixel_drawer::Metadata {
+                    color: cgmath::vec3(0.0, 1.0, 0.0),
+                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
+                    metalness: 0.0,
+                    roughness: 0.7,
+                },
+            },
+            pixel_drawer::Object::Box {
+                lower_corner: cgmath::point3(-5.0, 0.5, 0.0),
+                upper_corner: cgmath::point3(5.0, 1.5, 5.5),
+                metadata: pixel_drawer::Metadata {
+                    color: cgmath::vec3(1.0, 1.0, 1.0),
+                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
+                    metalness: 1.0,
+                    roughness: 0.02,
+                },
+            },
+            pixel_drawer::Object::Sphere {
+                center: cgmath::point3(0.5, 0.0, 1.0),
+                radius: 0.25,
+                metadata: pixel_drawer::Metadata {
+                    color: cgmath::vec3(0.0, 0.0, 0.0),
+                    emitance: cgmath::vec3(100.0, 100.0, 100.0),
+                    metalness: 0.0,
+                    roughness: 0.0,
+                },
+            },
         ],
     };
 
@@ -136,11 +141,10 @@ fn runner() -> color_eyre::Result<()> {
                         depth_or_array_layers: 1,
                     },
                 );
-
                 queue.submit(std::iter::once(encoder.finish()));
                 texture.present();
             }
-            std::thread::sleep(std::time::Duration::from_secs_f64(1.0));
+            std::thread::sleep(std::time::Duration::from_secs_f64(0.0166));
         });
         let mut pump = sdl.event_pump().wrap_error().unwrap();
         loop {

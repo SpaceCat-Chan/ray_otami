@@ -1,12 +1,12 @@
 use std::{
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     sync::{Arc, Mutex},
     thread::spawn,
 };
 
 use cgmath::prelude::*;
 use rand_distr::Distribution;
-use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 
 pub struct Metadata {
     pub color: cgmath::Vector3<f64>,

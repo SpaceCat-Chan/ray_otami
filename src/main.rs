@@ -1,10 +1,9 @@
 mod error_extra;
 mod pixel_drawer;
 
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 use error_extra::*;
-use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 
 fn main() {

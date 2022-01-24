@@ -1,7 +1,10 @@
 mod error_extra;
 mod pixel_drawer;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    ops::Add,
+    sync::{Arc, Mutex},
+};
 
 use error_extra::*;
 use wgpu::util::DeviceExt;
@@ -15,9 +18,11 @@ fn main() {
 
 fn runner() -> color_eyre::Result<()> {
     env_logger::init();
-    let sdl = sdl2::init().wrap_error()?;
-    let video = sdl.video().wrap_error()?;
-    let window = video.window("hi there", 960, 960).build()?;
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = winit::window::WindowBuilder::new()
+        .with_inner_size(winit::dpi::LogicalSize::new(960.0, 960.0))
+        .with_title("hi there")
+        .build(&event_loop)?;
 
     let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
     let surface = unsafe { instance.create_surface(&window) };
@@ -38,7 +43,7 @@ fn runner() -> color_eyre::Result<()> {
         None,
     ))?;
 
-    let (width, height) = window.size();
+    let winit::dpi::PhysicalSize { width, height } = window.inner_size();
     let preffered_surface_format = surface
         .get_preferred_format(&adaptor)
         .ok_or("failed to get preffered_surface_format")
@@ -101,58 +106,54 @@ fn runner() -> color_eyre::Result<()> {
     };
 
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
-
-    crossbeam::scope(|scope| {
-        let that_one = buffer_contents.clone();
-        scope.spawn(|_| pixel_drawer::render_to_buffer(that_one, (width, height), &world));
-        scope.spawn(move |_| loop {
-            {
-                let texture = surface.get_current_texture().unwrap();
-                let buffer_contents = buffer_contents.lock().unwrap();
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Temp Buffer"),
-                    contents: &buffer_contents,
-                    usage: wgpu::BufferUsages::COPY_SRC,
-                });
-
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("texture_buffer_copy_encoder"),
-                });
-
-                encoder.copy_buffer_to_texture(
-                    wgpu::ImageCopyBuffer {
-                        buffer: &buffer,
-                        layout: wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some((4 * width).try_into().unwrap()),
-                            rows_per_image: Some(height.try_into().unwrap()),
-                        },
-                    },
-                    wgpu::ImageCopyTexture {
-                        texture: &texture.texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                queue.submit(std::iter::once(encoder.finish()));
-                texture.present();
-            }
-            std::thread::sleep(std::time::Duration::from_secs_f64(0.0166));
-        });
-        let mut pump = sdl.event_pump().wrap_error().unwrap();
-        loop {
-            if let Some(sdl2::event::Event::Quit { .. }) = pump.poll_event() {
-                std::process::exit(0);
-            }
+    let that_one = buffer_contents.clone();
+    std::thread::spawn(move || pixel_drawer::render_to_buffer(that_one, (width, height), &world));
+    event_loop.run(move |event, _, control| {
+        if let winit::event::Event::WindowEvent {
+            event: winit::event::WindowEvent::CloseRequested,
+            ..
+        } = event
+        {
+            *control = winit::event_loop::ControlFlow::Exit;
+        } else {
+            *control = winit::event_loop::ControlFlow::WaitUntil(
+                std::time::Instant::now().add(std::time::Duration::from_secs_f64(0.0166666)),
+            )
         }
-    })
-    .unwrap();
+        let texture = surface.get_current_texture().unwrap();
+        let buffer_contents = buffer_contents.lock().unwrap();
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Temp Buffer"),
+            contents: &buffer_contents,
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
 
-    Ok(())
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("texture_buffer_copy_encoder"),
+        });
+
+        encoder.copy_buffer_to_texture(
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some((4 * width).try_into().unwrap()),
+                    rows_per_image: Some(height.try_into().unwrap()),
+                },
+            },
+            wgpu::ImageCopyTexture {
+                texture: &texture.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        texture.present();
+    });
 }

@@ -8,12 +8,11 @@ edition = "2021"
 [dependencies]
 bytemuck = "1.7.3"
 cgmath = "0.18.0"
-color-eyre = "0.5.11"
+color-eyre = "0.6.0"
 futures = "0.3.18"
-sdl2 = {version = "0.35.1", features = ["raw-window-handle"]}
+winit = "0.26.0"
 wgpu = {version = "0.11.0", features = ["spirv"]}
 env_logger = "0.9"
 rayon = "1.5.1"
 rand = "0.8.4"
 rand_distr = "0.4.2"
-crossbeam = "0.8.1"

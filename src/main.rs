@@ -58,64 +58,9 @@ fn runner() -> color_eyre::Result<()> {
     };
     surface.configure(&device, &surface_config);
 
-    let world = pixel_drawer::World {
-        max_ray_depth: 4,
-        ray_reflections: 1,
-        sky_color: cgmath::vec3(0.529, 0.808, 0.98),
-        objects: vec![
-            pixel_drawer::Object::Sphere {
-                center: cgmath::point3(0.0, 0.0, 2.0),
-                radius: 0.5,
-                metadata: pixel_drawer::Metadata {
-                    color: cgmath::vec3(1.0, 1.0, 0.0),
-                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                    metalness: 0.0,
-                    roughness: 0.1,
-                },
-            },
-            pixel_drawer::Object::Box {
-                lower_corner: cgmath::point3(-5.0, -5.0, 5.0),
-                upper_corner: cgmath::point3(5.0, 5.0, 5.5),
-                metadata: pixel_drawer::Metadata {
-                    color: cgmath::vec3(0.0, 1.0, 0.0),
-                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                    metalness: 0.0,
-                    roughness: 0.7,
-                },
-            },
-            pixel_drawer::Object::Box {
-                lower_corner: cgmath::point3(-5.0, 0.5, 0.0),
-                upper_corner: cgmath::point3(5.0, 1.5, 5.5),
-                metadata: pixel_drawer::Metadata {
-                    color: cgmath::vec3(1.0, 0.0, 0.0),
-                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                    metalness: 1.0,
-                    roughness: 0.02,
-                },
-            },
-            pixel_drawer::Object::Sphere {
-                center: cgmath::point3(0.5, 0.0, 1.0),
-                radius: 0.25,
-                metadata: pixel_drawer::Metadata {
-                    color: cgmath::vec3(0.0, 0.0, 0.0),
-                    emitance: cgmath::vec3(100.0, 100.0, 100.0),
-                    metalness: 0.0,
-                    roughness: 0.01,
-                },
-            },
-            pixel_drawer::Object::Torus {
-                major_radius: 0.5,
-                minor_radius: 0.1,
-                center: cgmath::point3(0.0, -1.0, 2.5),
-                metadata: pixel_drawer::Metadata {
-                    color: cgmath::vec3(1.0, 0.0, 1.0),
-                    emitance: cgmath::vec3(0.0, 0.0, 0.0),
-                    metalness: 0.0,
-                    roughness: 0.75,
-                },
-            },
-        ],
-    };
+    let world =
+        ron::de::from_reader(std::fs::File::open("shapes.ron").expect("failed to open shapes.ron"))
+            .expect("failed to deserialize contents of shapes.ron");
 
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
     let that_one = buffer_contents.clone();

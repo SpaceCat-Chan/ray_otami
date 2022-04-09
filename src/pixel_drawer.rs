@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ops::DerefMut,
     sync::{Arc, Mutex},
     thread::spawn,
@@ -7,24 +8,27 @@ use std::{
 use cgmath::prelude::*;
 use rand_distr::Distribution;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use serde::{Deserialize, Serialize};
 
-pub struct Metadata {
+#[derive(Serialize, Deserialize)]
+pub struct Material {
     pub color: cgmath::Vector3<f64>,
     pub emitance: cgmath::Vector3<f64>,
     pub metalness: f64,
     pub roughness: f64,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum Object {
     Sphere {
         center: cgmath::Point3<f64>,
         radius: f64,
-        metadata: Metadata,
+        material: String,
     },
     Box {
         lower_corner: cgmath::Point3<f64>,
         upper_corner: cgmath::Point3<f64>,
-        metadata: Metadata,
+        material: String,
     },
     PosModulo(Box<Object>, f64),
     Inv(Box<Object>),
@@ -34,7 +38,7 @@ pub enum Object {
         major_radius: f64,
         minor_radius: f64,
         center: cgmath::Point3<f64>,
-        metadata: Metadata,
+        material: String,
     },
 }
 
@@ -78,10 +82,10 @@ impl Object {
         }
     }
 
-    fn get_metadata(&self, point: cgmath::Point3<f64>) -> (f64, &Metadata) {
+    fn get_metadata(&self, point: cgmath::Point3<f64>) -> (f64, &str) {
         match self {
-            Self::Sphere { metadata, .. } => (self.estimate_distance(point), metadata),
-            Self::Box { metadata, .. } => (self.estimate_distance(point), metadata),
+            Self::Sphere { material, .. } => (self.estimate_distance(point), material),
+            Self::Box { material, .. } => (self.estimate_distance(point), material),
             Self::PosModulo(o, period) => o.get_metadata(point.map(|x| x.rem_euclid(*period))),
             Self::Inv(o) => {
                 let (dist, meta) = o.get_metadata(point);
@@ -105,20 +109,21 @@ impl Object {
                     (b_dist, b_meta)
                 }
             }
-            Self::Torus { metadata, .. } => (self.estimate_distance(point), metadata),
+            Self::Torus { material, .. } => (self.estimate_distance(point), material),
         }
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct World {
-    pub ray_reflections: usize,
     pub max_ray_depth: u32,
     pub sky_color: cgmath::Vector3<f64>,
     pub objects: Vec<Object>,
+    pub materials: HashMap<String, Material>,
 }
 
 static BLACK: cgmath::Vector3<f64> = cgmath::vec3(0.0, 0.0, 0.0);
-static BLACK_METADATA: Metadata = Metadata {
+static BLACK_MATERIAL: Material = Material {
     color: BLACK,
     emitance: BLACK,
     metalness: 0.0,
@@ -134,13 +139,13 @@ impl World {
             .unwrap_or(0.0)
     }
 
-    fn get_closest_metadata(&self, point: cgmath::Point3<f64>) -> &Metadata {
+    fn get_closest_metadata(&self, point: cgmath::Point3<f64>) -> &Material {
         self.objects
             .iter()
             .map(|x| x.get_metadata(point))
             .reduce(|acc, x| if x.0 < acc.0 { x } else { acc })
-            .map(|(_, a)| a)
-            .unwrap_or(&BLACK_METADATA)
+            .and_then(|(_, a)| self.materials.get(a))
+            .unwrap_or(&BLACK_MATERIAL)
     }
 
     fn get_distance_gradient(&self, point: cgmath::Point3<f64>) -> cgmath::Vector3<f64> {

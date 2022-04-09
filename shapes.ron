@@ -1,0 +1,68 @@
+(
+    max_ray_depth: 4,
+    sky_color: (
+        x: 0.529,
+        y: 0.808,
+        z: 0.98
+    ),
+    objects: [
+        Sphere(
+            center: (x: 0, y: 0, z: 2),
+            radius: 0.5,
+            material: "main_circle"
+        ),
+        Box(
+            lower_corner: (x: -5, y: -5, z: 5),
+            upper_corner: (x: 5, y: 5, z: 5.5),
+            material:"background_wall"
+        ),
+        Box(
+            lower_corner: (x: -5, y: 0.5, z: 0),
+            upper_corner: (x: 5, y: 1.5, z: 5.5),
+            material:"red_mirror"
+        ),
+        Sphere(
+            center: (x: 0.5, y: 0, z: 1),
+            radius: 0.25,
+            material: "light"
+        ),
+        Torus(
+            major_radius: 0.5,
+            minor_radius: 0.1,
+            center: (x: 0, y: -1, z: 2.5),
+            material:"torus"
+        )
+    ],
+    materials: {
+        "main_circle": (
+            color: (x: 1, y: 1, z: 0),
+            emitance: (x: 0 ,y: 0, z: 0),
+            metalness: 0,
+            roughness: 0.1
+        ),
+        "light": (
+            color: (x: 0, y: 0, z: 0),
+            emitance: (x: 100, y: 100, z: 100),
+            metalness: 0,
+            roughness: 0.01
+        ),
+        "red_mirror": (
+            color: (x: 1, y: 0, z: 0),
+            emitance: (x: 0, y: 0, z: 0),
+            metalness: 1,
+            roughness: 0.02
+        ),
+        "background_wall": (
+            color: (x: 0, y: 1, z: 0),
+            emitance: (x: 0, y: 0, z: 0),
+            metalness: 0,
+            roughness: 0.7
+        ),
+        "torus": (
+            color: (x: 1, y: 0, z: 1),
+            emitance: (x: 0, y: 0, z: 0),
+            metalness: 0,
+            roughness: 0.75
+        )
+    }
+)

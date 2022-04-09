@@ -25,7 +25,7 @@ fn runner() -> color_eyre::Result<()> {
         .with_title("hi there")
         .build(&event_loop)?;
 
-    let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
+    let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adaptor =
         futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -50,7 +50,7 @@ fn runner() -> color_eyre::Result<()> {
         .ok_or("failed to get preffered_surface_format")
         .wrap_error()?;
     let surface_config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::COPY_DST.union(wgpu::TextureUsages::RENDER_ATTACHMENT),
+        usage: wgpu::TextureUsages::COPY_DST,
         format: preffered_surface_format,
         width,
         height,
@@ -131,7 +131,6 @@ fn runner() -> color_eyre::Result<()> {
             *control = winit::event_loop::ControlFlow::WaitUntil(
                 std::time::Instant::now().add(std::time::Duration::from_secs_f64(0.0166666)),
             );
-
             let texture = surface.get_current_texture().unwrap();
             let buffer_contents = buffer_contents.lock().unwrap();
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

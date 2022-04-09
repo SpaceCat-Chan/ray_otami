@@ -30,6 +30,12 @@ pub enum Object {
     Inv(Box<Object>),
     Min(Box<Object>, Box<Object>),
     Max(Box<Object>, Box<Object>),
+    Torus {
+        major_radius: f64,
+        minor_radius: f64,
+        center: cgmath::Point3<f64>,
+        metadata: Metadata,
+    },
 }
 
 impl Object {
@@ -52,6 +58,23 @@ impl Object {
             Self::Inv(o) => -o.estimate_distance(point),
             Self::Max(a, b) => a.estimate_distance(point).max(b.estimate_distance(point)),
             Self::Min(a, b) => a.estimate_distance(point).min(b.estimate_distance(point)),
+            Self::Torus {
+                major_radius,
+                minor_radius,
+                center,
+                ..
+            } => {
+                let mut point = center - point;
+                let mut move_by = point;
+                move_by.y = 0.0;
+                //if move_by == cgmath::vec3(0.0, 0.0, 0.0) {
+                //    move_by = cgmath::vec3(1.0, 0.0, 1.0);
+                //}
+                let move_by = move_by.normalize_to(*major_radius);
+                point -= move_by;
+
+                point.magnitude() - minor_radius
+            }
         }
     }
 
@@ -82,6 +105,7 @@ impl Object {
                     (b_dist, b_meta)
                 }
             }
+            Self::Torus { metadata, .. } => (self.estimate_distance(point), metadata),
         }
     }
 }
@@ -177,7 +201,33 @@ fn distribution_ggx(
     let roughness2 = roughness.powi(4);
     let ndot = normal.dot(halfway).max(0.0);
     let denom = (ndot * ndot) * (roughness2 - 1.0) + 1.0;
+
     roughness2 / (std::f64::consts::PI * denom * denom)
+}
+
+//returns the smallest and largest possible values for a given roughness
+fn distribution_ggx_limits(roughness: f64) -> (f64, f64) {
+    let roughness2 = roughness.powi(4);
+
+    (roughness2, roughness2 / (roughness2 * roughness2))
+}
+
+fn inverse_distribution_ggx(roughness: f64, value: f64) -> f64 {
+    let roughness2 = roughness.powi(4);
+
+    let denom = roughness2 * roughness2 * value - 2.0 * value * roughness2 + value;
+
+    let num1 = value - roughness2 * value;
+    let num2 = ((roughness2 - 1.0) * (roughness2 - 1.0) * roughness2 * value).sqrt();
+
+    let ans1 = (num1 - num2) / denom;
+    let ans2 = (num1 + num2) / denom;
+
+    if ans1 < 0.0 {
+        ans2
+    } else {
+        ans1
+    }
 }
 
 fn geometry_schlick_ggx(normal_dot_dir: f64, mapped_roughness: f64) -> f64 {
@@ -200,6 +250,70 @@ fn fresnel_schlick(cos_theta: f64, f0: cgmath::Vector3<f64>) -> cgmath::Vector3<
     f0 + f0.map(|v| 1.0 - v) * (1.0 - cos_theta).clamp(0.0, 1.0).powi(5)
 }
 
+fn select_direction<T: rand::Rng>(
+    view_dir: cgmath::Vector3<f64>,
+    roughness: f64,
+    metalness: f64,
+    mut rand: T,
+) -> (cgmath::Vector3<f64>, cgmath::Vector3<f64>, f64) {
+    if rand_distr::Bernoulli::new(1.0 - metalness)
+        .unwrap()
+        .sample(&mut rand)
+    {
+        // not metallic enough for the complex method!
+        let dist = rand_distr::UnitSphere;
+        let ray_dir: [f64; 3] = dist.sample(&mut rand);
+        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
+        let halfway = (ray_dir + view_dir).normalize();
+        return (
+            ray_dir,
+            halfway,
+            distribution_ggx(cgmath::vec3(0.0, 1.0, 0.0), halfway, roughness),
+        );
+    }
+    let (min_ndf, max_ndf) = distribution_ggx_limits(roughness);
+
+    if max_ndf.is_nan() {
+        //roughness is 0, the halfway vector must be lined up exactly
+        let normal = cgmath::vec3(0.0, 1.0, 0.0);
+        return (
+            (-view_dir) - (normal.dot(-view_dir) * 2.0 * normal),
+            normal,
+            1.0,
+        );
+    }
+
+    let num = rand::distributions::Uniform::new_inclusive(0.0, 1.0).sample(&mut rand);
+    let num = num * num;
+    let num = num * (max_ndf - min_ndf) + min_ndf;
+
+    let cos_angle = inverse_distribution_ggx(roughness, num);
+
+    if cos_angle.is_nan() {
+        let dist = rand_distr::UnitSphere;
+        // roughness is exactly 1, which means the direction must not be biased
+        let ray_dir: [f64; 3] = dist.sample(&mut rand);
+        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
+        return (ray_dir, (ray_dir + view_dir).normalize(), 1.0);
+    }
+
+    let theta =
+        rand::distributions::Uniform::new(0.0, 2.0 * std::f64::consts::PI).sample(&mut rand);
+
+    let sin_angle = (1.0 - cos_angle * cos_angle).sqrt();
+
+    let (x, z) = theta.sin_cos();
+    let (x, z) = (x * sin_angle, z * sin_angle);
+
+    let halfway = cgmath::vec3(x, cos_angle, z).normalize();
+
+    (
+        (-view_dir) - (halfway.dot(-view_dir) * 2.0 * halfway),
+        halfway,
+        1.0,
+    )
+}
+
 pub fn render_ray(
     from: cgmath::Point3<f64>,
     direction: cgmath::Vector3<f64>,
@@ -213,22 +327,29 @@ pub fn render_ray(
             return metadata.emitance;
         }
         //send a new ray, get diffuse and specular weight, do math
-        let dist = rand_distr::UnitSphere;
         let normal = world.get_distance_gradient(ray.position).normalize();
         let rotation = cgmath::Basis3::between_vectors(cgmath::vec3(0.0, 1.0, 0.0), normal);
 
-        let ray_dir: [f64; 3] = dist.sample(&mut rand::thread_rng());
-        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
-        let ray_dir = rotation.rotate_vector(ray_dir);
-        let ray_color = render_ray(ray.previous_position, ray_dir, world, depth + 1);
+        let rand = rand::thread_rng();
 
+        // experiment: bias the ray selection so directions more likely so influence the final color are more likely to be chosen
+        let (ray_dir, halfway, ndf) = select_direction(
+            rotation.invert().rotate_vector(-direction),
+            metadata.roughness,
+            metadata.metalness,
+            rand,
+        );
+        let (ray_dir, halfway) = (
+            rotation.rotate_vector(ray_dir).normalize(),
+            rotation.rotate_vector(halfway),
+        );
+
+        let ray_color = render_ray(ray.previous_position, ray_dir, world, depth + 1);
         let f0 = cgmath::vec3(0.04, 0.04, 0.04);
         let f0 = f0.lerp(metadata.color, metadata.metalness);
-        let halfway = (ray_dir - direction).normalize();
         let f = fresnel_schlick(normal.dot(halfway).max(0.0), f0);
-        let ndf = distribution_ggx(normal, halfway, metadata.roughness);
         let g = geometry_smith(normal, -direction, ray_dir, metadata.roughness);
-        let specular = (ndf * g * f)
+        let specular = (g * f * ndf)
             / (4.0 * normal.dot(-direction).max(0.0) * normal.dot(ray_dir).max(0.0) + 0.000001);
         let k_d = f.map(|x| 1.0 - x);
         let k_d = k_d * (1.0 - metadata.metalness);

@@ -6,10 +6,17 @@
         z: 0.98
     ),
     objects: [
-        Sphere(
-            center: (x: 0, y: 0, z: 2),
-            radius: 0.5,
-            material: "main_circle"
+        Max(
+            Sphere(
+                center: (x: 0, y: 0, z: 2),
+                radius: 0.5,
+                material: "main_circle"
+            ),
+            Inv(Box(
+                lower_corner: (x: -0.15, y: -0.15, z: 1.55),
+                upper_corner: (x: 0.15, y: 0.15, z: 2.55),
+                material: "main_circle_interior"
+            ))
         ),
         Box(
             lower_corner: (x: -5, y: -5, z: 5),
@@ -39,6 +46,12 @@
             emitance: (x: 0 ,y: 0, z: 0),
             metalness: 0,
             roughness: 0.1
+        ),
+        "main_circle_interior": (
+            color: (x: 0, y: 1, z: 1),
+            emitance: (x: 0, y: 0, z: 0),
+            metalness: 0,
+            roughness: 0.75
         ),
         "light": (
             color: (x: 0, y: 0, z: 0),

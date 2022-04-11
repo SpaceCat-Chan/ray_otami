@@ -13,7 +13,7 @@
                 material: "main_circle"
             ),
             Inv(Box(
-                lower_corner: (x: -0.15, y: -0.15, z: 1.55),
+                lower_corner: (x: -0.15, y: -0.15, z: 1.45),
                 upper_corner: (x: 0.15, y: 0.15, z: 2.55),
                 material: "main_circle_interior"
             ))
@@ -33,11 +33,21 @@
             radius: 0.25,
             material: "light"
         ),
-        Torus(
-            major_radius: 0.5,
-            minor_radius: 0.1,
-            center: (x: 0, y: -1, z: 2.5),
-            material:"torus"
+        Smooth(
+            objects: [
+                Torus(
+                    major_radius: 0.5,
+                    minor_radius: 0.2,
+                    center: (x: 0, y: -1, z: 2.5),
+                    material: "torus"
+                ),
+                Sphere(
+                    center: (x: 0.65, y: -1, z: 2.5),
+                    radius: 0.5,
+                    material: "main_circle_interior"
+                )
+            ],
+            alpha: -4.0,
         )
     ],
     materials: {

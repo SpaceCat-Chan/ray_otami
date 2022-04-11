@@ -10,7 +10,7 @@ use rand_distr::Distribution;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Material {
     pub color: cgmath::Vector3<f64>,
     pub emitance: cgmath::Vector3<f64>,
@@ -40,6 +40,32 @@ pub enum Object {
         center: cgmath::Point3<f64>,
         material: String,
     },
+    Smooth {
+        alpha: f64,
+        objects: Vec<Object>,
+    },
+}
+
+fn smooth(values: &[f64], alpha: f64) -> (f64, Vec<f64>) {
+    let exp_terms: Vec<_> = values.iter().map(|d| (d * alpha).exp()).collect();
+
+    let top_sum: f64 = exp_terms
+        .iter()
+        .zip(values.iter())
+        .map(|(a, b)| a * b)
+        .sum();
+    let bottom_sum: f64 = exp_terms.iter().sum();
+
+    (top_sum / bottom_sum, exp_terms)
+}
+
+fn for_single<T>(vals: Vec<T>, bottom_sum: f64, distances: &[f64]) -> T
+where
+    T: std::ops::Mul<f64, Output = T> + std::ops::Div<f64, Output = T> + std::iter::Sum,
+    f64: std::ops::Mul<T, Output = T>,
+{
+    let top_sum: T = distances.iter().zip(vals).map(|(&b, c)| c / b).sum();
+    top_sum / bottom_sum
 }
 
 impl Object {
@@ -79,21 +105,38 @@ impl Object {
 
                 point.magnitude() - minor_radius
             }
+            Self::Smooth { alpha, objects } => {
+                let distances: Vec<_> =
+                    objects.iter().map(|o| o.estimate_distance(point)).collect();
+                smooth(&distances, *alpha).0
+            }
         }
     }
 
-    fn get_metadata(&self, point: cgmath::Point3<f64>) -> (f64, &str) {
+    fn get_metadata(
+        &self,
+        point: cgmath::Point3<f64>,
+        material_lookup: &HashMap<String, Material>,
+    ) -> (f64, Material) {
         match self {
-            Self::Sphere { material, .. } => (self.estimate_distance(point), material),
-            Self::Box { material, .. } => (self.estimate_distance(point), material),
-            Self::PosModulo(o, period) => o.get_metadata(point.map(|x| x.rem_euclid(*period))),
+            Self::Sphere { material, .. } => (
+                self.estimate_distance(point),
+                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
+            ),
+            Self::Box { material, .. } => (
+                self.estimate_distance(point),
+                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
+            ),
+            Self::PosModulo(o, period) => {
+                o.get_metadata(point.map(|x| x.rem_euclid(*period)), material_lookup)
+            }
             Self::Inv(o) => {
-                let (dist, meta) = o.get_metadata(point);
+                let (dist, meta) = o.get_metadata(point, material_lookup);
                 (-dist, meta)
             }
             Object::Min(a, b) => {
-                let (a_dist, a_meta) = a.get_metadata(point);
-                let (b_dist, b_meta) = b.get_metadata(point);
+                let (a_dist, a_meta) = a.get_metadata(point, material_lookup);
+                let (b_dist, b_meta) = b.get_metadata(point, material_lookup);
                 if a_dist < b_dist {
                     (a_dist, a_meta)
                 } else {
@@ -101,15 +144,73 @@ impl Object {
                 }
             }
             Object::Max(a, b) => {
-                let (a_dist, a_meta) = a.get_metadata(point);
-                let (b_dist, b_meta) = b.get_metadata(point);
+                let (a_dist, a_meta) = a.get_metadata(point, material_lookup);
+                let (b_dist, b_meta) = b.get_metadata(point, material_lookup);
                 if a_dist > b_dist {
                     (a_dist, a_meta)
                 } else {
                     (b_dist, b_meta)
                 }
             }
-            Self::Torus { material, .. } => (self.estimate_distance(point), material),
+            Self::Torus { material, .. } => (
+                self.estimate_distance(point),
+                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
+            ),
+            Self::Smooth { alpha, objects } => {
+                let materials: Vec<_> = objects
+                    .iter()
+                    .map(|o| o.get_metadata(point, material_lookup))
+                    .collect();
+                let distances: Vec<_> = materials.iter().map(|(d, _)| *d).collect();
+                let (final_distance, mut exp_terms) = smooth(&distances, *alpha);
+
+                if *alpha < 0.0 {
+                    exp_terms = exp_terms.into_iter().map(|v| 1.0 / v).collect();
+                }
+                let bottom_sum = exp_terms.iter().sum();
+
+                let roughness = for_single(
+                    materials
+                        .iter()
+                        .map(|(_, m)| m.roughness)
+                        .collect::<Vec<_>>(),
+                    bottom_sum,
+                    &exp_terms,
+                )
+                .clamp(0.0, 1.0);
+                let metalness = for_single(
+                    materials
+                        .iter()
+                        .map(|(_, m)| m.metalness)
+                        .collect::<Vec<_>>(),
+                    bottom_sum,
+                    &exp_terms,
+                )
+                .clamp(0.0, 1.0);
+                let color = for_single(
+                    materials.iter().map(|(_, m)| m.color).collect::<Vec<_>>(),
+                    bottom_sum,
+                    &exp_terms,
+                );
+                let emitance = for_single(
+                    materials
+                        .iter()
+                        .map(|(_, m)| m.emitance)
+                        .collect::<Vec<_>>(),
+                    bottom_sum,
+                    &exp_terms,
+                );
+
+                (
+                    final_distance,
+                    Material {
+                        color,
+                        emitance,
+                        metalness,
+                        roughness,
+                    },
+                )
+            }
         }
     }
 }
@@ -139,13 +240,13 @@ impl World {
             .unwrap_or(0.0)
     }
 
-    fn get_closest_metadata(&self, point: cgmath::Point3<f64>) -> &Material {
+    fn get_closest_metadata(&self, point: cgmath::Point3<f64>) -> Material {
         self.objects
             .iter()
-            .map(|x| x.get_metadata(point))
+            .map(|x| x.get_metadata(point, &self.materials))
             .reduce(|acc, x| if x.0 < acc.0 { x } else { acc })
-            .and_then(|(_, a)| self.materials.get(a))
-            .unwrap_or(&BLACK_MATERIAL)
+            .map(|(_, mat)| mat)
+            .unwrap_or(BLACK_MATERIAL)
     }
 
     fn get_distance_gradient(&self, point: cgmath::Point3<f64>) -> cgmath::Vector3<f64> {

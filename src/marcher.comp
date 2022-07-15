@@ -1,0 +1,209 @@
+#version 440 core
+
+struct Object {
+    // x = material id
+    // y = refered to in other objects
+    // z = rendered to screen
+    // a = type id
+    // NOTE(SpaceCat~Chan): 
+    // could be packed further by having material id actually represent mat_id + 1
+    // and have 0 mean the object isn't rendered, but padding and alignment rules mean it doesn't matter
+    uvec4 mrrt;
+    vec4 args1;
+    vec4 args2;
+};
+struct Material {
+    vec4 color;
+    vec4 emitance;
+    // x = metalness
+    // y = roughness
+    // z = unused
+    // a = unused
+    vec4 mrxx;
+};
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 1) buffer objects_buf {
+    Object objects[];
+};
+
+layout(std430, binding = 2) buffer materials_buf {
+    Material materials[];
+};
+
+struct Ray {
+    // NOTE(SpaceCat~Chan): gonna avoid vec3 like the plague
+    vec4 position;
+    vec4 direction;
+};
+
+layout(std430, binding = 3) buffer in_rays_buf {
+    Ray in_rays[];
+};
+
+layout(std430, binding = 4) buffer out_rays_buf {
+    Ray out_rays[];
+};
+
+layout(std430, binding = 5) buffer hit_results_buf {
+    uint hit_results[];
+};
+
+// lets hope no one needs more
+const uint MAX_OBJECTS_REFERED_TO = 8;
+
+uint cur_refer_index = 0;
+float refer_buffer[MAX_OBJECTS_REFERED_TO];
+
+const uint SPHERE_ID = 0;
+float sdf_sphere(Object self, vec3 position) {
+    vec3 sphere_position = self.args1.xyz;
+    float dist = distance(sphere_position, position);
+    return dist - self.args1.a;
+}
+
+const uint BOX_ID = 1;
+float sdf_box(Object self, vec3 position) {
+    vec3 lower_corner = self.args1.xyz;
+    vec3 upper_corner = self.args2.xyz;
+    vec3 center = (lower_corner + upper_corner) / 2.0;
+    vec3 b = center - lower_corner;
+
+    vec3 q = abs(center - position) - b;
+    float dist = distance(max(q, vec3(0.0,0.0,0.0)), vec3(0.0,0.0,0.0));
+    return dist + min(max(max(q.x,q.y),q.z),0.0);
+}
+
+// ummmm, can't really make this... lack of recursion...
+const uint POS_MODULO_ID = 2;
+float sdf_pos_modulo(Object self, vec3 position) {
+    return 1e100;
+}
+
+const uint INV_ID = 3;
+float sdf_inv(Object self, vec3 position) {
+    float sdf = refer_buffer[uint(self.args1.x)];
+    return -sdf;
+}
+
+const uint MAX_ID = 4;
+float sdf_max(Object self, vec3 position) {
+    float a1 = refer_buffer[uint(self.args1.x)];
+    float a2 = refer_buffer[uint(self.args1.y)];
+    return max(a1,a2);
+}
+
+const uint MIN_ID = 5;
+float sdf_min(Object self, vec3 position) {
+    float a1 = refer_buffer[uint(self.args1.x)];
+    float a2 = refer_buffer[uint(self.args1.y)];
+    return min(a1,a2);
+}
+
+const uint TORUS_ID = 6;
+float sdf_torus(Object self, vec3 position) {
+    vec3 point = self.args1.xyz - position;
+    vec3 move_by = point;
+    move_by.y = 0;
+    if (move_by == vec3(0.0,0.0,0.0)) {
+        move_by = vec3(1.0,0.0,0.0);
+    }
+    move_by = self.args1.a * normalize(move_by);
+    point -= move_by;
+
+    return length(point) - self.args2.x;
+}
+
+const uint SMOOTH_ID = 7;
+float sdf_smooth(Object self, vec3 position)
+{
+    uint start = uint(self.args1.x);
+    uint end = uint(self.args1.y);
+    uint step_ = uint(self.args1.z);
+    float top_term;
+    float bottom_term;
+    for (uint cur = start; cur <= end; cur += step_) {
+        float val = refer_buffer[cur];
+        float val_exp = exp(val * self.args1.a);
+        top_term += val * val_exp;
+        bottom_term += val_exp;
+    }
+    return top_term/bottom_term;
+}
+
+float sdf_single(Object self, vec3 position) {
+    float dist = 0.0;
+    switch (uint(self.mrrt.a)) {
+        case SPHERE_ID:
+            dist = sdf_sphere(self, position);
+            break;
+        case BOX_ID:
+            dist = sdf_box(self, position);
+            break;
+        case POS_MODULO_ID:
+            dist = sdf_pos_modulo(self, position);
+            break;
+        case INV_ID:
+            dist = sdf_inv(self, position);
+            break;
+        case MAX_ID:
+            dist = sdf_max(self, position);
+            break;
+        case MIN_ID:
+            dist = sdf_min(self, position);
+            break;
+        case TORUS_ID:
+            dist = sdf_torus(self, position);
+            break;
+        case SMOOTH_ID:
+            dist = sdf_smooth(self, position);
+            break;
+        default:
+            // invalid id, not good
+            dist = 1e100;
+            break;
+    }
+    if(self.mrrt.y != 0) {
+        refer_buffer[cur_refer_index] = dist;
+        cur_refer_index++;
+    }
+    return dist;
+}
+
+// x = distance, y = object index
+vec2 sdf(vec3 position) {
+    cur_refer_index = 0;
+    float min_dist;
+    uint min_index;
+    for(uint cur=0; cur < objects.length(); cur++) {
+        float dist = sdf_single(objects[cur], position);
+        if(dist < min_dist) {
+            min_dist = dist;
+            min_index = cur;
+        }
+    }
+    return vec2(min_dist,float(min_index));
+}
+
+const uint MAX_MARCH = 100;
+const float DISTANCE_CUTOFF = 1e-5;
+const float MAX_DISTANCE = 1e99;
+
+// returns object id + 1, 0 means no hit (god i wish i could have sum types and tuples)
+uint march(vec3 position, vec3 direction) {
+    for(uint counter=0; counter<MAX_MARCH; counter++) {
+        vec2 ret = sdf(position);
+        float dist = ret.x;
+        uint hit = uint(ret.y);
+        if(dist > MAX_DISTANCE) {
+            return 0;
+        }
+        if(dist < DISTANCE_CUTOFF) {
+            return hit + 1;
+        }
+        position += direction * dist;
+    }
+    return 0;
+}
+

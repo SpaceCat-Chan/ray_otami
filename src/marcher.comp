@@ -238,7 +238,7 @@ mat4 rotation3d(vec3 axis, float angle) {
 layout(std430, binding = 6) buffer rand_wide_buf {
     uint rand_wide[];
 };
-layout(binding = 7) uniform rand_deep_bug {uint rand_deep;};
+layout(binding = 7) uniform rand_deep_buf {uint rand_deep;};
 
 uint rng_state;
 
@@ -326,6 +326,7 @@ void main() {
         out_rays[curr_index] = error;
     }
     uint hit_result = march(ray.position.xyz, ray.direction.xyz);
+    hit_results[curr_index] = hit_result;
     if (hit_result == 0) {
         Ray error = {
             vec4(-1,-1,-1,-1), vec4(-1,-1,-1,-1)

@@ -275,6 +275,42 @@ vec3 random_point_on_sphere() {
     }
 }
 
+float PI = radians(180);
+
+float distribution_ggx(vec3 normal, vec3 halfway, float roughness)
+{
+    float r2 = roughness * roughness * roughness * roughness;
+    float ndot = max(dot(normal, halfway), 0);
+    float denom = (ndot * ndot) * (r2 - 1) + 1;
+
+    return r2 / (PI * denom * denom);
+}
+
+// x is smallest, y is largest
+vec2 distribution_ggx_limits(float roughness) {
+    float r2 = roughness * roughness * roughness * roughness;
+
+    return vec2(r2, r2 / (r2 * r2));
+}
+
+float inverse_distribution_ggx(float roughness, float value) {
+    float r2 = roughness * roughness * roughness * roughness;
+
+    float denom = r2 * r2 * value - 2 * value * r2 + value;
+
+    float num1 = value - r2 * value;
+    float num2 = sqrt((r2 - 1.0) * (r2 - 1.0) * r2 * value);
+
+    float ans1 = (num1 - num2) / denom;
+    float ans2 = (num1 + num2) / denom;
+
+    if (ans1 < 0.0) {
+        return ans2;
+    } else {
+        return ans1;
+    }
+}
+
 void main() {
     uint curr_index = gl_WorkGroupID.x;
     
@@ -305,7 +341,7 @@ void main() {
 		mat4 rotation = rotation3d(axis, angle);
         Material mat = materials[object];
         float metalness_test = get_rand();
-        if (metalness_test < mat.mrxx.x) {
+        if (mat.mrxx.y == 1 || metalness_test < mat.mrxx.x) {
             // non-metalic method
             // this one is simple, just get a point and move it to the correct hemisphere
             vec3 dir = random_point_on_sphere();
@@ -320,6 +356,29 @@ void main() {
             // metalic method
             // significantly more complex
             // requires inverting a complex function and detecting some NaNs
+            if(mat.mrxx.y == 0) {
+                Ray res = {
+                    vec4(continue_march_from, 0),
+                    vec4(reflect(ray.direction.xyz, normal),0)
+                };
+                out_rays[curr_index] = res;
+            } else {
+                vec2 limits = distribution_ggx_limits(mat.mrxx.y);
+                float rand_val = get_rand();
+                rand_val *= rand_val;
+                rand_val *= limits.y - limits.x;
+                rand_val += limits.x;
+                float cos_angle = inverse_distribution_ggx(mat.mrxx.y, rand_val);
+                float sin_angle = sqrt(1 - cos_angle * cos_angle);
+                float theta = get_rand() * 2 * PI;
+                vec3 halfway = vec3(cos(theta) * sin_angle, cos_angle, sin(theta) * sin_angle);
+                vec3 dir = (-ray.direction.xyz) - dot(halfway, -ray.direction.xyz) * 2 * halfway;
+                Ray res = {
+                    vec4(continue_march_from, 0),
+                    vec4(dir, 0),
+                };
+                out_rays[curr_index] = res;
+            }
         }
     }
 }

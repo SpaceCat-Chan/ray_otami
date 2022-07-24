@@ -1,0 +1,58 @@
+#version 440 core
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+// copy pasted needed parts from marcher.comp
+// they should always have the same interface
+// uneeded parts can simply be ommited from where they are uneeded
+// in case of a dispute
+// marcher.comp is defined as the "correct" interface and painter.comp should be changed
+
+struct Material {
+    vec4 color;
+    vec4 emitance;
+    // x = metalness
+    // y = roughness
+    // z = unused
+    // a = unused
+    vec4 mrxx;
+};
+
+// 1 used for objects
+
+layout(std430, binding = 2) buffer materials_buf {
+    Material materials[];
+};
+
+struct Ray {
+    vec4 position;
+    vec4 direction;
+};
+
+layout(std430, binding = 3) buffer in_rays_buf {
+    Ray in_rays[];
+};
+
+layout(std430, binding = 4) buffer out_rays_buf {
+    Ray out_rays[];
+};
+
+layout(std430, binding = 5) buffer hit_results_buf {
+    uint hit_results[];
+};
+
+// 6 and 7 used for random data
+
+// NOTE: out always means "further towards the final bounce"
+// so painter.comp works in inverse, reading from out and writing to in
+layout(std430, binding = 8) buffer in_color_buf {
+    vec4 in_color[];
+};
+layout(std430, binding = 9) buffer out_color_buf {
+    vec4 out_color[];
+};
+
+void main() {
+    uint curr_index = gl_WorkGroupID.x;
+
+}

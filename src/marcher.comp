@@ -50,6 +50,13 @@ layout(std430, binding = 5) buffer hit_results_buf {
     uint hit_results[];
 };
 
+layout(std430, binding = 6) buffer rand_wide_buf {
+    uint rand_wide[];
+};
+layout(binding = 7) uniform rand_deep_buf {uint rand_deep;};
+
+// 8 and 9 used for colors
+
 // lets hope no one needs more
 const uint MAX_OBJECTS_REFERED_TO = 8;
 
@@ -234,11 +241,6 @@ mat4 rotation3d(vec3 axis, float angle) {
 		0.0,                                0.0,                                0.0,                                1.0
 	);
 }
-
-layout(std430, binding = 6) buffer rand_wide_buf {
-    uint rand_wide[];
-};
-layout(binding = 7) uniform rand_deep_buf {uint rand_deep;};
 
 uint rng_state;
 

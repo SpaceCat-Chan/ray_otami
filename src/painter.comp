@@ -37,8 +37,13 @@ layout(std430, binding = 4) buffer out_rays_buf {
     Ray out_rays[];
 };
 
+struct HitResult {
+    uint object;
+    vec4 normal;
+};
+
 layout(std430, binding = 5) buffer hit_results_buf {
-    uint hit_results[];
+    HitResult hit_results[];
 };
 
 // 6 and 7 used for random data
@@ -52,7 +57,67 @@ layout(std430, binding = 9) buffer out_color_buf {
     vec4 out_color[];
 };
 
+float PI = radians(180);
+
+float distribution_ggx(vec3 normal, vec3 halfway, float roughness)
+{
+    float r2 = roughness * roughness * roughness * roughness;
+    float ndot = max(dot(normal, halfway), 0);
+    float denom = (ndot * ndot) * (r2 - 1) + 1;
+
+    return r2 / (PI * denom * denom);
+}
+
+vec3 fresnel_schlick(float cos_theta, vec3 f0) {
+    float cos_magic = clamp(1 - cos_theta, 0, 1);
+    return f0 + (vec3(1) - f0) * cos_magic * cos_magic * cos_magic * cos_magic * cos_magic;
+}
+
+float geometry_smith_ggx(float normal_dot_dir, float mapped_roughness) {
+    return normal_dot_dir / (normal_dot_dir * (1 - mapped_roughness) + mapped_roughness);
+}
+
+float geometry_smith(vec3 normal, vec3 view, vec3 light, float roughness) {
+    float r = roughness + 1;
+    float k = (r * r) / 8;
+    return geometry_smith_ggx(max(dot(normal, view), 0), k) * geometry_smith_ggx(max(dot(normal, light), 0), k);
+}
+
+vec4 skybox_color = vec4(1,1,1,1);
+
 void main() {
     uint curr_index = gl_WorkGroupID.x;
+    HitResult hit = hit_results[curr_index];
+    if(hit.object == 0) {
+        in_color[curr_index] = skybox_color;
+        return;
+    }
+    hit.object -= 1;
+    Material mat = materials[hit.object];
 
+    Ray in_going = in_rays[curr_index];
+    Ray out_going = in_rays[curr_index];
+
+    vec3 halfway = ((-in_going.direction.xyz) + out_going.direction.xyz) / 2;
+
+    float ndf;
+    if(out_going.direction.w == 1) {
+        ndf = 1;
+    } else {
+        ndf = distribution_ggx(hit.normal.xyz, halfway, mat.mrxx.y);
+    }
+    vec3 f0 = vec3(0.04, 0.04, 0.04);
+    f0 = mix(mat.color.xyz, f0, mat.mrxx.x);
+    vec3 f = fresnel_schlick(max(dot(hit.normal.xyz, halfway), 0.0), f0);
+    float g = geometry_smith(hit.normal.xyz, -in_going.direction.xyz, out_going.direction.xyz, mat.mrxx.y);
+    vec3 specular = (g * f * ndf)
+        / (4.0 * max(dot(hit.normal.xyz,-in_going.direction.xyz), 0.0) * max(dot(hit.normal.xyz, out_going.direction.xyz),0.0) + 0.000001);
+    vec3 k_d = vec3(1) - f;
+    k_d *= (1 - mat.mrxx.x);
+    vec3 final_color = (k_d * mat.color.xyz / PI + specular)
+        * out_color[curr_index].xyz
+        * max(dot(hit.normal.xyz, out_going.direction.xyz), 0)
+        * 10
+        + mat.emitance.xyz;
+    in_color[curr_index] = vec4(final_color, 1);
 }

@@ -50,9 +50,14 @@ layout(std430, binding = 4) buffer out_rays_buf {
     Ray out_rays[];
 };
 
-// 0 means "no hit", else subtract one to get the object id it hit
+struct HitResult {
+    // 0 means "no hit", else subtract one to get the actual object id it hit
+    uint object;
+    vec4 normal;
+};
+
 layout(std430, binding = 5) buffer hit_results_buf {
-    uint hit_results[];
+    HitResult hit_results[];
 };
 
 layout(std430, binding = 6) buffer rand_wide_buf {
@@ -284,15 +289,6 @@ vec3 random_point_on_sphere() {
 
 float PI = radians(180);
 
-float distribution_ggx(vec3 normal, vec3 halfway, float roughness)
-{
-    float r2 = roughness * roughness * roughness * roughness;
-    float ndot = max(dot(normal, halfway), 0);
-    float denom = (ndot * ndot) * (r2 - 1) + 1;
-
-    return r2 / (PI * denom * denom);
-}
-
 // x is smallest, y is largest
 vec2 distribution_ggx_limits(float roughness) {
     float r2 = roughness * roughness * roughness * roughness;
@@ -333,8 +329,12 @@ void main() {
         out_rays[curr_index] = error;
     }
     uint hit_result = march(ray.position.xyz, ray.direction.xyz);
-    hit_results[curr_index] = hit_result;
     if (hit_result == 0) {
+        HitResult hit_result_obj = {
+            hit_result,
+            vec4(0,1,0,0),
+        };
+        hit_results[curr_index] = hit_result_obj;
         Ray error = {
             vec4(-1,-1,-1,-1), vec4(-1,-1,-1,-1)
         };
@@ -342,8 +342,13 @@ void main() {
     } else {
         uint object = hit_result - 1;
         vec3 hit_pos = final_march_position;
-        // goal: find out what the out going ray should look like
         vec3 normal = find_normal(hit_pos);
+        HitResult hit_result_obj = {
+            hit_result,
+            vec4(normal,0),
+        };
+        hit_results[curr_index] = hit_result_obj;
+        // goal: find out what the out going ray should look like
 		vec3 axis = cross(normal, vec3(0, 1, 0));
 		float angle = -acos(dot(normal, vec3(0, 1, 0)));
 		mat4 rotation = rotation3d(axis, angle);

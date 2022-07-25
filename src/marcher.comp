@@ -24,11 +24,11 @@ struct Material {
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, binding = 1) buffer objects_buf {
+layout(std430, binding = 1) readonly buffer objects_buf {
     Object objects[];
 };
 
-layout(std430, binding = 2) buffer materials_buf {
+layout(std430, binding = 2) readonly buffer materials_buf {
     Material materials[];
 };
 
@@ -42,7 +42,7 @@ struct Ray {
     vec4 direction;
 };
 
-layout(std430, binding = 3) buffer in_rays_buf {
+layout(std430, binding = 3) readonly buffer in_rays_buf {
     Ray in_rays[];
 };
 
@@ -52,15 +52,19 @@ layout(std430, binding = 4) buffer out_rays_buf {
 
 struct HitResult {
     // 0 means "no hit", else subtract one to get the actual object id it hit
-    uint object;
     vec4 normal;
+    uint object;
+    // these don't actually matter, array stride is 8 because alignment either way
+    uint RESERVED1;
+    uint RESERVED2;
+    uint RESERVED3;
 };
 
 layout(std430, binding = 5) buffer hit_results_buf {
     HitResult hit_results[];
 };
 
-layout(std430, binding = 6) buffer rand_wide_buf {
+layout(std430, binding = 6) readonly buffer rand_wide_buf {
     uint rand_wide[];
 };
 layout(binding = 7) uniform rand_deep_buf {uint rand_deep;};
@@ -331,8 +335,9 @@ void main() {
     uint hit_result = march(ray.position.xyz, ray.direction.xyz);
     if (hit_result == 0) {
         HitResult hit_result_obj = {
-            hit_result,
             vec4(0,1,0,0),
+            hit_result,
+            0,0,0
         };
         hit_results[curr_index] = hit_result_obj;
         Ray error = {
@@ -344,8 +349,9 @@ void main() {
         vec3 hit_pos = final_march_position;
         vec3 normal = find_normal(hit_pos);
         HitResult hit_result_obj = {
-            hit_result,
             vec4(normal,0),
+            hit_result,
+            0,0,0
         };
         hit_results[curr_index] = hit_result_obj;
         // goal: find out what the out going ray should look like

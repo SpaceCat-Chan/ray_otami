@@ -20,7 +20,7 @@ struct Material {
 
 // 1 used for objects
 
-layout(std430, binding = 2) buffer materials_buf {
+layout(std430, binding = 2) readonly buffer materials_buf {
     Material materials[];
 };
 
@@ -29,7 +29,7 @@ struct Ray {
     vec4 direction;
 };
 
-layout(std430, binding = 3) buffer in_rays_buf {
+layout(std430, binding = 3) readonly buffer in_rays_buf {
     Ray in_rays[];
 };
 
@@ -38,8 +38,11 @@ layout(std430, binding = 4) buffer out_rays_buf {
 };
 
 struct HitResult {
-    uint object;
     vec4 normal;
+    uint object;
+    uint RESERVED1;
+    uint RESERVED2;
+    uint RESERVED3;
 };
 
 layout(std430, binding = 5) buffer hit_results_buf {
@@ -53,7 +56,7 @@ layout(std430, binding = 5) buffer hit_results_buf {
 layout(std430, binding = 8) buffer in_color_buf {
     vec4 in_color[];
 };
-layout(std430, binding = 9) buffer out_color_buf {
+layout(std430, binding = 9) readonly buffer out_color_buf {
     vec4 out_color[];
 };
 

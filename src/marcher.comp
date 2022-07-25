@@ -34,6 +34,10 @@ layout(std430, binding = 2) buffer materials_buf {
 
 struct Ray {
     // NOTE(SpaceCat~Chan): gonna avoid vec3 like the plague
+    // also, i'm using the w component to transfer extra data, because why not
+    // specifically, if the direction w is 1, then it was created using the metallic method
+    // and then the painter doesn't need to include the distibution_ggx term
+    // and if the w is -1, then it's a fake ray and further bounces should not be calculated
     vec4 position;
     vec4 direction;
 };
@@ -46,6 +50,7 @@ layout(std430, binding = 4) buffer out_rays_buf {
     Ray out_rays[];
 };
 
+// 0 means "no hit", else subtract one to get the object id it hit
 layout(std430, binding = 5) buffer hit_results_buf {
     uint hit_results[];
 };
@@ -362,7 +367,7 @@ void main() {
             if(mat.mrxx.y == 0) {
                 Ray res = {
                     vec4(continue_march_from, 0),
-                    vec4(reflect(ray.direction.xyz, normal),0)
+                    vec4(reflect(ray.direction.xyz, normal),1)
                 };
                 out_rays[curr_index] = res;
             } else {
@@ -378,7 +383,7 @@ void main() {
                 vec3 dir = (-ray.direction.xyz) - dot(halfway, -ray.direction.xyz) * 2 * halfway;
                 Ray res = {
                     vec4(continue_march_from, 0),
-                    vec4(dir, 0),
+                    vec4(dir, 1),
                 };
                 out_rays[curr_index] = res;
             }

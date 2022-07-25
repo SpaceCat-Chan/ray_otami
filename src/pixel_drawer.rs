@@ -6,9 +6,11 @@ use std::{
 };
 
 use cgmath::prelude::*;
+use rand::RngCore;
 use rand_distr::Distribution;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
+use wgpu::util::DeviceExt;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Material {
@@ -260,269 +262,573 @@ impl World {
     }
 }
 
-struct HitResult {
-    position: cgmath::Point3<f64>,
-    previous_position: cgmath::Point3<f64>,
-    hit_anything: bool,
+// TODO(SpaceCat~Chan): move World to other file
+pub struct PixelRenderer {
+    world: World,
+
+    objects_buffer: wgpu::Buffer,
+    materials_buffer: wgpu::Buffer,
+
+    render_depth: usize,
+    screen_size: (u32, u32),
+    ray_buffers: Vec<wgpu::Buffer>,
+    color_buffers: Vec<wgpu::Buffer>,
+    hit_result_buffers: Vec<wgpu::Buffer>,
+    random_data_buffers: Vec<wgpu::Buffer>,
+    single_random_value: wgpu::Buffer,
+
+    marcher_painter_bind_layout: wgpu::BindGroupLayout,
+    marcher_pipeline: wgpu::ComputePipeline,
+    painter_pipeline: wgpu::ComputePipeline,
+    marcher_painter_bind_groups: Vec<wgpu::BindGroup>,
+
+    render_count: u32,
+
+    accumulate_buffer: wgpu::Buffer,
+
+    collector_vertex_input: wgpu::Buffer,
+    collector_state_uniform: wgpu::Buffer,
+    collector_bind_layout: wgpu::BindGroupLayout,
+    collector_pipeline_layout: wgpu::PipelineLayout,
+    collector_pipeline: wgpu::RenderPipeline,
+    collector_bind_group: wgpu::BindGroup,
 }
 
-fn cast_ray(
-    from: cgmath::Point3<f64>,
-    direction: cgmath::Vector3<f64>,
-    world: &World,
-) -> HitResult {
-    let mut position = from;
-    let mut prev_pos = from;
-    for _ in 0..1000 {
-        let current_distance = world.estimate_distance(position);
-        if current_distance < 0.0001 {
-            return HitResult {
-                position,
-                previous_position: prev_pos,
-                hit_anything: true,
-            };
+impl PixelRenderer {
+    fn new(
+        world: World,
+        render_depth: usize,
+        screen_size: (u32, u32),
+        device: &mut wgpu::Device,
+        queue: &mut wgpu::Queue,
+    ) -> Self {
+        let marcher_shader_module =
+            device.create_shader_module(wgpu::include_spirv!("marcher.comp.spv"));
+        let painter_shader_module =
+            device.create_shader_module(wgpu::include_spirv!("painter.comp.spv"));
+
+        let marcher_painter_bind_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("marcher and painter bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let total_pixel_count = screen_size.0 as u64 * screen_size.1 as u64;
+
+        // TODO(SpaceCat~Chan): use create_buffer_init to fill these
+        // with the actual data from "world" immediatly
+        let objects_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("object buffer"),
+            // 12 floats,
+            // vec4 mrrt
+            // vec4 args1
+            // vec4 args2
+            size: 4 * 12 * total_pixel_count,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("material buffer"),
+            // 12 floats,
+            // vec4 color
+            // vec4 emitance
+            // vec4 mrxx
+            size: 4 * 12 * 1,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let marcher_painter_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("marcher/painter pipeline layout"),
+                bind_group_layouts: &[&marcher_painter_bind_layout],
+                push_constant_ranges: &[],
+            });
+
+        let marcher_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&marcher_painter_pipeline_layout),
+            module: &marcher_shader_module,
+            entry_point: "main",
+        });
+        let painter_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&marcher_painter_pipeline_layout),
+            module: &painter_shader_module,
+            entry_point: "main",
+        });
+
+        let mut ray_buffers = vec![];
+        let mut color_buffers = vec![];
+        for _ in 0..(render_depth + 2) {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                // 4 bytes per float, 4+4 floats per pixel
+                size: 4 * 8 * total_pixel_count,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            ray_buffers.push(buffer);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                // 4 bytes per float, 4 floats per pixel
+                size: 4 * 4 * total_pixel_count,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            color_buffers.push(buffer);
         }
-        if current_distance > 10000.0 {
-            return HitResult {
-                position,
-                previous_position: prev_pos,
-                hit_anything: false,
-            };
+
+        let mut hit_result_buffers = vec![];
+        for _ in 0..(render_depth + 1) {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                // 1 uint + 4 floats + 3 empty, each is 4 bytes
+                size: 4 * 8 * total_pixel_count,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            hit_result_buffers.push(buffer);
         }
-        prev_pos = position;
-        position += direction * current_distance;
-    }
-    HitResult {
-        position,
-        previous_position: prev_pos,
-        hit_anything: false,
-    }
-}
-
-fn distribution_ggx(
-    normal: cgmath::Vector3<f64>,
-    halfway: cgmath::Vector3<f64>,
-    roughness: f64,
-) -> f64 {
-    let roughness2 = roughness.powi(4);
-    let ndot = normal.dot(halfway).max(0.0);
-    let denom = (ndot * ndot) * (roughness2 - 1.0) + 1.0;
-
-    roughness2 / (std::f64::consts::PI * denom * denom)
-}
-
-//returns the smallest and largest possible values for a given roughness
-fn distribution_ggx_limits(roughness: f64) -> (f64, f64) {
-    let roughness2 = roughness.powi(4);
-
-    (roughness2, roughness2 / (roughness2 * roughness2))
-}
-
-fn inverse_distribution_ggx(roughness: f64, value: f64) -> f64 {
-    let roughness2 = roughness.powi(4);
-
-    let denom = roughness2 * roughness2 * value - 2.0 * value * roughness2 + value;
-
-    let num1 = value - roughness2 * value;
-    let num2 = ((roughness2 - 1.0) * (roughness2 - 1.0) * roughness2 * value).sqrt();
-
-    let ans1 = (num1 - num2) / denom;
-    let ans2 = (num1 + num2) / denom;
-
-    if ans1 < 0.0 {
-        ans2
-    } else {
-        ans1
-    }
-}
-
-fn geometry_schlick_ggx(normal_dot_dir: f64, mapped_roughness: f64) -> f64 {
-    normal_dot_dir / (normal_dot_dir * (1.0 - mapped_roughness) + mapped_roughness)
-}
-
-fn geometry_smith(
-    normal: cgmath::Vector3<f64>,
-    view: cgmath::Vector3<f64>,
-    light: cgmath::Vector3<f64>,
-    roughness: f64,
-) -> f64 {
-    let r = roughness + 1.0;
-    let k = (r * r) / 8.0;
-    geometry_schlick_ggx(normal.dot(view).max(0.0), k)
-        * geometry_schlick_ggx(normal.dot(light).max(0.0), k)
-}
-
-fn fresnel_schlick(cos_theta: f64, f0: cgmath::Vector3<f64>) -> cgmath::Vector3<f64> {
-    f0 + f0.map(|v| 1.0 - v) * (1.0 - cos_theta).clamp(0.0, 1.0).powi(5)
-}
-
-fn select_direction<T: rand::Rng>(
-    view_dir: cgmath::Vector3<f64>,
-    roughness: f64,
-    metalness: f64,
-    mut rand: T,
-) -> (cgmath::Vector3<f64>, cgmath::Vector3<f64>, f64) {
-    if rand_distr::Bernoulli::new(1.0 - metalness)
-        .unwrap()
-        .sample(&mut rand)
-    {
-        // not metallic enough for the complex method!
-        let dist = rand_distr::UnitSphere;
-        let ray_dir: [f64; 3] = dist.sample(&mut rand);
-        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
-        let halfway = (ray_dir + view_dir).normalize();
-        return (
-            ray_dir,
-            halfway,
-            distribution_ggx(cgmath::vec3(0.0, 1.0, 0.0), halfway, roughness),
-        );
-    }
-    let (min_ndf, max_ndf) = distribution_ggx_limits(roughness);
-
-    if max_ndf.is_nan() {
-        //roughness is 0, the halfway vector must be lined up exactly
-        let normal = cgmath::vec3(0.0, 1.0, 0.0);
-        return (
-            (-view_dir) - (normal.dot(-view_dir) * 2.0 * normal),
-            normal,
-            1.0,
-        );
-    }
-
-    let num = rand::distributions::Uniform::new_inclusive(0.0, 1.0).sample(&mut rand);
-    let num = num * num;
-    let num = num * (max_ndf - min_ndf) + min_ndf;
-
-    let cos_angle = inverse_distribution_ggx(roughness, num);
-
-    if cos_angle.is_nan() {
-        let dist = rand_distr::UnitSphere;
-        // roughness is exactly 1, which means the direction must not be biased
-        let ray_dir: [f64; 3] = dist.sample(&mut rand);
-        let ray_dir = cgmath::vec3(ray_dir[0], ray_dir[1].abs(), ray_dir[2]);
-        return (ray_dir, (ray_dir + view_dir).normalize(), 1.0);
-    }
-
-    let theta =
-        rand::distributions::Uniform::new(0.0, 2.0 * std::f64::consts::PI).sample(&mut rand);
-
-    let sin_angle = (1.0 - cos_angle * cos_angle).sqrt();
-
-    let (x, z) = theta.sin_cos();
-    let (x, z) = (x * sin_angle, z * sin_angle);
-
-    let halfway = cgmath::vec3(x, cos_angle, z).normalize();
-
-    (
-        (-view_dir) - (halfway.dot(-view_dir) * 2.0 * halfway),
-        halfway,
-        1.0,
-    )
-}
-
-pub fn render_ray(
-    from: cgmath::Point3<f64>,
-    direction: cgmath::Vector3<f64>,
-    world: &World,
-    depth: u32,
-) -> cgmath::Vector3<f64> {
-    let ray = cast_ray(from, direction, world);
-    if ray.hit_anything {
-        let metadata = world.get_closest_metadata(ray.position);
-        if depth == world.max_ray_depth {
-            return metadata.emitance;
+        let random_data_buffers = vec![];
+        let mut random_data_gen = rand::thread_rng();
+        let random_data = vec![0u8; 4 * total_pixel_count as usize];
+        for _ in 0..(render_depth + 1) {
+            random_data_gen.fill_bytes(&mut random_data[..]);
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("buffer with random data"),
+                contents: &random_data[..],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+            random_data_buffers.push(buffer);
         }
-        //send a new ray, get diffuse and specular weight, do math
-        let normal = world.get_distance_gradient(ray.position).normalize();
-        let rotation = cgmath::Basis3::between_vectors(cgmath::vec3(0.0, 1.0, 0.0), normal);
+        let single_random_value = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("a single random u32 value"),
+            contents: &random_data_gen.next_u32().to_le_bytes(),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+        });
 
-        let rand = rand::thread_rng();
+        let mut marcher_painter_bind_groups = vec![];
+        for index in 0..(render_depth + 1) {
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &marcher_painter_bind_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &objects_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &materials_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &ray_buffers[index],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &ray_buffers[index + 1],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &hit_result_buffers[index],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &random_data_buffers[index],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &single_random_value,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffers[index],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &color_buffers[index + 1],
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                ],
+            });
+            marcher_painter_bind_groups.push(bind_group);
+        }
 
-        // experiment: bias the ray selection so directions more likely so influence the final color are more likely to be chosen
-        let (ray_dir, halfway, ndf) = select_direction(
-            rotation.invert().rotate_vector(-direction),
-            metadata.roughness,
-            metadata.metalness,
-            rand,
+        let accumulate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("accumulate buffer: buffer used for acumulating results"),
+            // just a vec4
+            size: 4 * 4 * total_pixel_count,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let collector_state_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("collector uniform buffer"),
+            // just 2 uints and a float
+            size: 4 * 3,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+
+        let collector_vertex_input = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vertex input for collector"),
+            contents: bytemuck::bytes_of(&[
+                -1.0,
+                -1.0,
+                0.5,
+                0.0,
+                0.0,
+                1.0,
+                -1.0,
+                0.5,
+                screen_size.0 as f32,
+                0.0,
+                -1.0,
+                1.0,
+                0.5,
+                0.0,
+                screen_size.1 as f32,
+                1.0,
+                1.0,
+                0.5,
+                screen_size.0 as f32,
+                screen_size.1 as f32,
+            ]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let collector_bind_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bind group layout for collector"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let collector_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("collector pipeline layout"),
+                bind_group_layouts: &[&collector_bind_layout],
+                push_constant_ranges: &[],
+            });
+
+        let collector_vertex_shader_module =
+            device.create_shader_module(wgpu::include_spirv!("collector.vert.spv"));
+        let collector_fragment_shader_module =
+            device.create_shader_module(wgpu::include_spirv!("collector.frag.spv"));
+
+        let collector_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("collector pipeline"),
+            layout: Some(&collector_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &collector_vertex_shader_module,
+                entry_point: "main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 4 * 5,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Cw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &collector_fragment_shader_module,
+                entry_point: "main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+
+        let collector_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bind group for collector"),
+            layout: &collector_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &color_buffers[0],
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &accumulate_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &collector_state_uniform,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+            ],
+        });
+
+        Self {
+            world,
+            objects_buffer,
+            materials_buffer,
+            render_depth,
+            screen_size,
+            ray_buffers,
+            color_buffers,
+            hit_result_buffers,
+            random_data_buffers,
+            single_random_value,
+            marcher_painter_bind_layout,
+            marcher_pipeline,
+            painter_pipeline,
+            marcher_painter_bind_groups,
+            render_count: 0,
+            accumulate_buffer,
+            collector_vertex_input,
+            collector_state_uniform,
+            collector_bind_layout,
+            collector_pipeline_layout,
+            collector_pipeline,
+            collector_bind_group,
+        }
+    }
+
+    fn render(
+        &mut self,
+        render_to: &wgpu::TextureView,
+        device: &mut wgpu::Device,
+        queue: &mut wgpu::Queue,
+        exposure: f32,
+    ) {
+        let recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("raymarch encoder"),
+        });
+        for index in 0..(self.render_depth + 1) {
+            let pass = recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            pass.set_pipeline(&self.marcher_pipeline);
+            pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
+            pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
+        }
+        for index in (0..(self.render_depth + 1)).rev() {
+            let pass = recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            pass.set_pipeline(&self.painter_pipeline);
+            pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
+            pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
+        }
+        self.render_count += 1;
+        queue.write_buffer(
+            &self.collector_state_uniform,
+            0,
+            bytemuck::bytes_of(&CollectorUniform {
+                render_count: self.render_count,
+                frame_width: self.screen_size.0,
+                exposure,
+            }),
         );
-        let (ray_dir, halfway) = (
-            rotation.rotate_vector(ray_dir).normalize(),
-            rotation.rotate_vector(halfway),
-        );
-
-        let ray_color = render_ray(ray.previous_position, ray_dir, world, depth + 1);
-        let f0 = cgmath::vec3(0.04, 0.04, 0.04);
-        let f0 = f0.lerp(metadata.color, metadata.metalness);
-        let f = fresnel_schlick(normal.dot(halfway).max(0.0), f0);
-        let g = geometry_smith(normal, -direction, ray_dir, metadata.roughness);
-        let specular = (g * f * ndf)
-            / (4.0 * normal.dot(-direction).max(0.0) * normal.dot(ray_dir).max(0.0) + 0.000001);
-        let k_d = f.map(|x| 1.0 - x);
-        let k_d = k_d * (1.0 - metadata.metalness);
-        (k_d.mul_element_wise(metadata.color) / std::f64::consts::PI + specular)
-            .mul_element_wise(ray_color)
-            * normal.dot(ray_dir).max(0.0)
-            * 10.0
-            + metadata.emitance
-    } else {
-        BLACK
+        {
+            let pass = recorder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("submitting rendered frame to be collected and shown on screen"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: render_to,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
+            pass.set_pipeline(&self.collector_pipeline);
+            pass.set_bind_group(0, &self.collector_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.collector_vertex_input.slice(..));
+            pass.draw(0..4, 0..1);
+        }
+        let render_thing = recorder.finish();
+        queue.submit([render_thing].into_iter());
     }
 }
 
-pub fn render_pixel(
-    (width, height): (u32, u32),
-    pixel_idx: u32,
-    world: &World,
-) -> (f64, f64, f64, f64) {
-    let pixel_pos = (pixel_idx % width, pixel_idx / width);
-    let pixel_pos = (
-        (pixel_pos.0 as f64 / width as f64 - 0.5) * 2.0,
-        (pixel_pos.1 as f64 / height as f64 - 0.5) * 2.0,
-    );
-
-    let color = render_ray(
-        cgmath::point3(0.0, 0.0, 0.0),
-        cgmath::vec3(pixel_pos.0, pixel_pos.1, 1.0).normalize(),
-        world,
-        0,
-    );
-    //color.div_assign_element_wise(color.map(|x| x + 1.0));
-    (color.x, color.y, color.z, 1.0)
-}
-
-pub fn render_to_buffer(buffer: Arc<Mutex<Vec<u8>>>, (width, height): (u32, u32), world: &World) {
-    let (mut sender, mut reciever) = futures::channel::mpsc::unbounded::<(usize, [f64; 4])>();
-    let reciever = spawn(move || {
-        let mut ray_count = vec![0usize; (width * height) as usize];
-        let mut actual_buffer = vec![0f64; (width * height * 4) as usize];
-        'outer: loop {
-            if let Ok(mut lock) = buffer.lock() {
-                let r = reciever.try_next();
-                match r {
-                    Ok(Some((index, val))) => {
-                        ray_count[index] += 1;
-                        let ray_count = ray_count[index] as f64;
-                        for (n, item) in val.iter().enumerate() {
-                            let old_val = actual_buffer[index * 4 + n];
-                            let new_val = (item + old_val * (ray_count - 1.0)) / ray_count;
-                            actual_buffer[index * 4 + n] = new_val;
-                            let new_val = new_val / (new_val + 1.0);
-                            lock.deref_mut()[index * 4 + n] = (new_val * 255.0) as u8;
-                        }
-                    }
-                    Ok(None) => break 'outer,
-                    Err(_) => continue,
-                }
-            }
-        }
-    });
-    (0..)
-        .into_iter()
-        .par_bridge()
-        .map(|p| p % (width * height))
-        .map(|pos| (pos, render_pixel((width, height), pos, world)))
-        .map(|(pos, (b, g, r, a))| (pos as usize, [r, g, b, a]))
-        .for_each(|a| sender.unbounded_send(a).unwrap());
-    sender.disconnect();
-    reciever.join().unwrap();
+#[repr(C)]
+#[derive(bytemuck::Zeroable, bytemuck::Pod, Clone, Copy)]
+struct CollectorUniform {
+    render_count: u32,
+    frame_width: u32,
+    exposure: f32,
 }

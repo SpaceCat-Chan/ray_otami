@@ -1,6 +1,6 @@
 #version 440 core
 
-layout(binding = 0) buffer colors_buf {
+layout(binding = 0) readonly buffer colors_buf {
     vec4 colors[];
 };
 layout(binding = 1) buffer accumulate_buf {

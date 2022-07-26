@@ -136,23 +136,6 @@ float sdf_torus(Object self, vec3 position) {
     return length(point) - self.args2.x;
 }
 
-const uint SMOOTH_ID = 7;
-float sdf_smooth(Object self, vec3 position)
-{
-    uint start = uint(self.args1.x);
-    uint end = uint(self.args1.y);
-    uint step_ = uint(self.args1.z);
-    float top_term;
-    float bottom_term;
-    for (uint cur = start; cur <= end; cur += step_) {
-        float val = refer_buffer[cur];
-        float val_exp = exp(val * self.args1.a);
-        top_term += val * val_exp;
-        bottom_term += val_exp;
-    }
-    return top_term/bottom_term;
-}
-
 float sdf_single(Object self, vec3 position) {
     float dist = 0.0;
     switch (uint(self.mrrt.a)) {
@@ -176,9 +159,6 @@ float sdf_single(Object self, vec3 position) {
             break;
         case TORUS_ID:
             dist = sdf_torus(self, position);
-            break;
-        case SMOOTH_ID:
-            dist = sdf_smooth(self, position);
             break;
         default:
             // invalid id, not good

@@ -46,10 +46,12 @@ pub enum Object {
     Sphere {
         center: cgmath::Point3<f64>,
         radius: f64,
+        material: String,
     },
     Box {
         lower_corner: cgmath::Point3<f64>,
         upper_corner: cgmath::Point3<f64>,
+        material: String,
     },
     PosModulo(Box<Object>, f64),
     Inv(Box<Object>),
@@ -59,25 +61,31 @@ pub enum Object {
         major_radius: f64,
         minor_radius: f64,
         center: cgmath::Point3<f64>,
-    },
-    Smooth {
-        alpha: f64,
-        objects: Vec<Object>,
+        material: String,
     },
 }
 
 impl Object {
     fn to_raw(
         &self,
-        material: u32,
+        material_map: &HashMap<String, u32>,
         is_rendered: bool,
         is_refered_to: bool,
         current_refer_count: u32,
     ) -> (Vec<RawObject>, u32) {
         match self {
-            Object::Sphere { center, radius } => (
+            Object::Sphere {
+                center,
+                radius,
+                material,
+            } => (
                 vec![RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 0],
+                    mrrt: [
+                        material_map[material],
+                        is_refered_to as _,
+                        is_rendered as _,
+                        0,
+                    ],
                     args1: [
                         center.x as f32,
                         center.y as f32,
@@ -91,9 +99,15 @@ impl Object {
             Object::Box {
                 lower_corner,
                 upper_corner,
+                material,
             } => (
                 vec![RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 1],
+                    mrrt: [
+                        material_map[material],
+                        is_refered_to as _,
+                        is_rendered as _,
+                        1,
+                    ],
                     args1: [
                         lower_corner.x as f32,
                         lower_corner.y as f32,
@@ -120,9 +134,9 @@ impl Object {
             ),
             Object::Inv(inverted) => {
                 let (mut inner, used_refers) =
-                    inverted.to_raw(material, false, true, current_refer_count);
+                    inverted.to_raw(material_map, false, true, current_refer_count);
                 inner.push(RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 3],
+                    mrrt: [0, is_refered_to as _, is_rendered as _, 3],
                     args1: [(current_refer_count + used_refers) as f32, 0.0, 0.0, 0.0],
                     args2: [0.0, 0.0, 0.0, 0.0],
                 });
@@ -130,13 +144,14 @@ impl Object {
             }
             Object::Min(a, b) => {
                 let (mut a_inner, used_refers) =
-                    a.to_raw(material, false, true, current_refer_count);
+                    a.to_raw(material_map, false, true, current_refer_count);
                 let current_refer_count = current_refer_count + used_refers;
-                let (b_inner, used_refers_b) = a.to_raw(material, false, true, current_refer_count);
+                let (b_inner, used_refers_b) =
+                    a.to_raw(material_map, false, true, current_refer_count);
                 a_inner.extend(b_inner.into_iter());
                 let total_used_refers = used_refers + used_refers_b;
                 a_inner.push(RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 5],
+                    mrrt: [0, is_refered_to as _, is_rendered as _, 5],
                     args1: [
                         (current_refer_count) as _,
                         (current_refer_count + used_refers_b) as _,
@@ -149,13 +164,14 @@ impl Object {
             }
             Object::Max(a, b) => {
                 let (mut a_inner, used_refers) =
-                    a.to_raw(material, false, true, current_refer_count);
+                    a.to_raw(material_map, false, true, current_refer_count);
                 let current_refer_count = current_refer_count + used_refers;
-                let (b_inner, used_refers_b) = a.to_raw(material, false, true, current_refer_count);
+                let (b_inner, used_refers_b) =
+                    a.to_raw(material_map, false, true, current_refer_count);
                 a_inner.extend(b_inner.into_iter());
                 let total_used_refers = used_refers + used_refers_b;
                 a_inner.push(RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 4],
+                    mrrt: [0, is_refered_to as _, is_rendered as _, 4],
                     args1: [
                         (current_refer_count) as _,
                         (current_refer_count + used_refers_b) as _,
@@ -170,9 +186,15 @@ impl Object {
                 major_radius,
                 minor_radius,
                 center,
+                material,
             } => (
                 vec![RawObject {
-                    mrrt: [material, is_refered_to as _, is_rendered as _, 6],
+                    mrrt: [
+                        material_map[material],
+                        is_refered_to as _,
+                        is_rendered as _,
+                        6,
+                    ],
                     args1: [
                         center.x as _,
                         center.y as _,
@@ -183,47 +205,6 @@ impl Object {
                 }],
                 0,
             ),
-            Object::Smooth { alpha, objects } => {
-                // currently have no way of laying more objects out correctly in memory
-                assert!(objects.len() <= 2 && !objects.is_empty(), "smooth on the gpu can't yet handle more than 2 objects, and must have at least 1");
-                if objects.len() == 1 {
-                    let obj = &objects[1];
-                    let (mut inner, used_refers) =
-                        obj.to_raw(material, false, true, current_refer_count);
-                    inner.push(RawObject {
-                        mrrt: [material, is_refered_to as _, is_rendered as _, 7],
-                        args1: [
-                            (current_refer_count + used_refers) as f32,
-                            (current_refer_count + used_refers) as f32,
-                            1.0,
-                            *alpha as _,
-                        ],
-                        args2: [0.0, 0.0, 0.0, 0.0],
-                    });
-                    (inner, used_refers + 1)
-                } else {
-                    let a = &objects[1];
-                    let b = &objects[2];
-                    let (mut a_inner, used_refers) =
-                        a.to_raw(material, false, true, current_refer_count);
-                    let current_refer_count = current_refer_count + used_refers;
-                    let (b_inner, used_refers_b) =
-                        a.to_raw(material, false, true, current_refer_count);
-                    a_inner.extend(b_inner.into_iter());
-                    let total_used_refers = used_refers + used_refers_b;
-                    a_inner.push(RawObject {
-                        mrrt: [material, is_refered_to as _, is_rendered as _, 4],
-                        args1: [
-                            (current_refer_count) as _,
-                            (current_refer_count + used_refers_b) as _,
-                            used_refers_b as _,
-                            *alpha as _,
-                        ],
-                        args2: [0.0, 0.0, 0.0, 0.0],
-                    });
-                    (a_inner, total_used_refers + 2)
-                }
-            }
         }
     }
 }
@@ -232,18 +213,24 @@ impl Object {
 pub struct World {
     pub max_ray_depth: u32,
     pub sky_color: cgmath::Vector3<f64>,
-    pub objects: Vec<(Object, Material)>,
+    pub objects: Vec<Object>,
+    pub materials: HashMap<String, Material>,
 }
 
 impl World {
     fn to_raw(&self) -> (Vec<RawObject>, Vec<RawMaterial>) {
         let mut materials = vec![];
+        let mut material_map = HashMap::new();
+
+        for (name, material) in self.materials {
+            materials.push(material.to_raw());
+            material_map.insert(name, (materials.len() - 1) as _);
+        }
+
         let mut objects = vec![];
         let mut ref_count = 0;
-        for (object, material) in &self.objects {
-            materials.push(material.to_raw());
-            let (obj_raw, used_refs) =
-                object.to_raw((materials.len() - 1) as _, true, false, ref_count);
+        for object in &self.objects {
+            let (obj_raw, used_refs) = object.to_raw(&material_map, true, false, ref_count);
             ref_count += used_refs;
             objects.extend(obj_raw.into_iter());
         }

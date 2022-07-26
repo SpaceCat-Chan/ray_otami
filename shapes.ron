@@ -32,22 +32,6 @@
             center: (x: 0.5, y: 0, z: 1),
             radius: 0.25,
             material: "light"
-        ),
-        Smooth(
-            objects: [
-                Torus(
-                    major_radius: 0.5,
-                    minor_radius: 0.2,
-                    center: (x: 0, y: -1, z: 2.5),
-                    material: "torus"
-                ),
-                Sphere(
-                    center: (x: 0.65, y: -1, z: 2.5),
-                    radius: 0.5,
-                    material: "main_circle_interior"
-                )
-            ],
-            alpha: -4.0,
         )
     ],
     materials: {

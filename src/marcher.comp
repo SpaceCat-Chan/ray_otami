@@ -51,8 +51,8 @@ layout(std430, binding = 4) buffer out_rays_buf {
 };
 
 struct HitResult {
-    // 0 means "no hit", else subtract one to get the actual object id it hit
     vec4 normal;
+    // 0 means "no hit", else subtract one to get the actual object id it hit
     uint object;
     // these don't actually matter, array stride is 8 because alignment either way
     uint RESERVED1;
@@ -199,7 +199,7 @@ vec2 sdf(vec3 position) {
     uint min_index;
     for(uint cur=0; cur < objects.length(); cur++) {
         float dist = sdf_single(objects[cur], position);
-        if(dist < min_dist) {
+        if(objects[cur].mrrt.z != 0 &&dist < min_dist) {
             min_dist = dist;
             min_index = cur;
         }

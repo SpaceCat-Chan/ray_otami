@@ -5,6 +5,7 @@ use std::{
     thread::spawn,
 };
 
+use bytemuck::{Pod, Zeroable};
 use cgmath::prelude::*;
 use rand::RngCore;
 use rand_distr::Distribution;
@@ -20,17 +21,35 @@ pub struct Material {
     pub roughness: f64,
 }
 
+impl Material {
+    fn to_raw(&self) -> RawMaterial {
+        RawMaterial {
+            color: [
+                self.color.x as f32,
+                self.color.y as f32,
+                self.color.z as f32,
+                0.0,
+            ],
+            emitance: [
+                self.emitance.x as f32,
+                self.emitance.y as f32,
+                self.emitance.z as f32,
+                0.0,
+            ],
+            mrxx: [self.metalness as f32, self.roughness as f32, 0.0, 0.0],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum Object {
     Sphere {
         center: cgmath::Point3<f64>,
         radius: f64,
-        material: String,
     },
     Box {
         lower_corner: cgmath::Point3<f64>,
         upper_corner: cgmath::Point3<f64>,
-        material: String,
     },
     PosModulo(Box<Object>, f64),
     Inv(Box<Object>),
@@ -40,7 +59,6 @@ pub enum Object {
         major_radius: f64,
         minor_radius: f64,
         center: cgmath::Point3<f64>,
-        material: String,
     },
     Smooth {
         alpha: f64,
@@ -48,170 +66,163 @@ pub enum Object {
     },
 }
 
-fn smooth(values: &[f64], alpha: f64) -> (f64, Vec<f64>) {
-    let exp_terms: Vec<_> = values.iter().map(|d| (d * alpha).exp()).collect();
-
-    let top_sum: f64 = exp_terms
-        .iter()
-        .zip(values.iter())
-        .map(|(a, b)| a * b)
-        .sum();
-    let bottom_sum: f64 = exp_terms.iter().sum();
-
-    (top_sum / bottom_sum, exp_terms)
-}
-
-fn for_single<T>(vals: Vec<T>, bottom_sum: f64, distances: &[f64]) -> T
-where
-    T: std::ops::Mul<f64, Output = T> + std::ops::Div<f64, Output = T> + std::iter::Sum,
-    f64: std::ops::Mul<T, Output = T>,
-{
-    let top_sum: T = distances.iter().zip(vals).map(|(&b, c)| c / b).sum();
-    top_sum / bottom_sum
-}
-
 impl Object {
-    fn estimate_distance(&self, point: cgmath::Point3<f64>) -> f64 {
+    fn to_raw(
+        &self,
+        material: u32,
+        is_rendered: bool,
+        is_refered_to: bool,
+        current_refer_count: u32,
+    ) -> (Vec<RawObject>, u32) {
         match self {
-            Self::Sphere { center, radius, .. } => point.distance(*center) - radius,
-            Self::Box {
+            Object::Sphere { center, radius } => (
+                vec![RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 0],
+                    args1: [
+                        center.x as f32,
+                        center.y as f32,
+                        center.z as f32,
+                        *radius as f32,
+                    ],
+                    args2: [0.0, 0.0, 0.0, 0.0],
+                }],
+                0,
+            ),
+            Object::Box {
                 lower_corner,
                 upper_corner,
-                ..
-            } => {
-                let center = lower_corner.midpoint(*upper_corner);
-                let b = center - lower_corner;
-
-                let q = (point - center).map(|x| x.abs()) - b;
-                q.map(|x| x.max(0.0)).distance(cgmath::vec3(0.0, 0.0, 0.0))
-                    + q.x.max(q.y.max(q.z)).min(0.0)
+            } => (
+                vec![RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 1],
+                    args1: [
+                        lower_corner.x as f32,
+                        lower_corner.y as f32,
+                        lower_corner.z as f32,
+                        0.0,
+                    ],
+                    args2: [
+                        upper_corner.x as f32,
+                        upper_corner.y as f32,
+                        upper_corner.z as f32,
+                        0.0,
+                    ],
+                }],
+                0,
+            ),
+            Object::PosModulo(_, _) => (
+                // this one can't be implemented on the gpu just yet
+                vec![RawObject {
+                    mrrt: [0, 0, 0, 2],
+                    args1: [0.0, 0.0, 0.0, 0.0],
+                    args2: [0.0, 0.0, 0.0, 0.0],
+                }],
+                0,
+            ),
+            Object::Inv(inverted) => {
+                let (mut inner, used_refers) =
+                    inverted.to_raw(material, false, true, current_refer_count);
+                inner.push(RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 3],
+                    args1: [(current_refer_count + used_refers) as f32, 0.0, 0.0, 0.0],
+                    args2: [0.0, 0.0, 0.0, 0.0],
+                });
+                (inner, used_refers + 1)
             }
-            Self::PosModulo(o, period) => o.estimate_distance(point.map(|x| x.rem_euclid(*period))),
-            Self::Inv(o) => -o.estimate_distance(point),
-            Self::Max(a, b) => a.estimate_distance(point).max(b.estimate_distance(point)),
-            Self::Min(a, b) => a.estimate_distance(point).min(b.estimate_distance(point)),
-            Self::Torus {
+            Object::Min(a, b) => {
+                let (mut a_inner, used_refers) =
+                    a.to_raw(material, false, true, current_refer_count);
+                let current_refer_count = current_refer_count + used_refers;
+                let (b_inner, used_refers_b) = a.to_raw(material, false, true, current_refer_count);
+                a_inner.extend(b_inner.into_iter());
+                let total_used_refers = used_refers + used_refers_b;
+                a_inner.push(RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 5],
+                    args1: [
+                        (current_refer_count) as _,
+                        (current_refer_count + used_refers_b) as _,
+                        0.0,
+                        0.0,
+                    ],
+                    args2: [0.0, 0.0, 0.0, 0.0],
+                });
+                (a_inner, total_used_refers + 2)
+            }
+            Object::Max(a, b) => {
+                let (mut a_inner, used_refers) =
+                    a.to_raw(material, false, true, current_refer_count);
+                let current_refer_count = current_refer_count + used_refers;
+                let (b_inner, used_refers_b) = a.to_raw(material, false, true, current_refer_count);
+                a_inner.extend(b_inner.into_iter());
+                let total_used_refers = used_refers + used_refers_b;
+                a_inner.push(RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 4],
+                    args1: [
+                        (current_refer_count) as _,
+                        (current_refer_count + used_refers_b) as _,
+                        0.0,
+                        0.0,
+                    ],
+                    args2: [0.0, 0.0, 0.0, 0.0],
+                });
+                (a_inner, total_used_refers + 2)
+            }
+            Object::Torus {
                 major_radius,
                 minor_radius,
                 center,
-                ..
-            } => {
-                let mut point = center - point;
-                let mut move_by = point;
-                move_by.y = 0.0;
-                //if move_by == cgmath::vec3(0.0, 0.0, 0.0) {
-                //    move_by = cgmath::vec3(1.0, 0.0, 1.0);
-                //}
-                let move_by = move_by.normalize_to(*major_radius);
-                point -= move_by;
-
-                point.magnitude() - minor_radius
-            }
-            Self::Smooth { alpha, objects } => {
-                let distances: Vec<_> =
-                    objects.iter().map(|o| o.estimate_distance(point)).collect();
-                smooth(&distances, *alpha).0
-            }
-        }
-    }
-
-    fn get_metadata(
-        &self,
-        point: cgmath::Point3<f64>,
-        material_lookup: &HashMap<String, Material>,
-    ) -> (f64, Material) {
-        match self {
-            Self::Sphere { material, .. } => (
-                self.estimate_distance(point),
-                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
+            } => (
+                vec![RawObject {
+                    mrrt: [material, is_refered_to as _, is_rendered as _, 6],
+                    args1: [
+                        center.x as _,
+                        center.y as _,
+                        center.z as _,
+                        *major_radius as _,
+                    ],
+                    args2: [*minor_radius as _, 0.0, 0.0, 0.0],
+                }],
+                0,
             ),
-            Self::Box { material, .. } => (
-                self.estimate_distance(point),
-                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
-            ),
-            Self::PosModulo(o, period) => {
-                o.get_metadata(point.map(|x| x.rem_euclid(*period)), material_lookup)
-            }
-            Self::Inv(o) => {
-                let (dist, meta) = o.get_metadata(point, material_lookup);
-                (-dist, meta)
-            }
-            Object::Min(a, b) => {
-                let (a_dist, a_meta) = a.get_metadata(point, material_lookup);
-                let (b_dist, b_meta) = b.get_metadata(point, material_lookup);
-                if a_dist < b_dist {
-                    (a_dist, a_meta)
+            Object::Smooth { alpha, objects } => {
+                // currently have no way of laying more objects out correctly in memory
+                assert!(objects.len() <= 2 && !objects.is_empty(), "smooth on the gpu can't yet handle more than 2 objects, and must have at least 1");
+                if objects.len() == 1 {
+                    let obj = &objects[1];
+                    let (mut inner, used_refers) =
+                        obj.to_raw(material, false, true, current_refer_count);
+                    inner.push(RawObject {
+                        mrrt: [material, is_refered_to as _, is_rendered as _, 7],
+                        args1: [
+                            (current_refer_count + used_refers) as f32,
+                            (current_refer_count + used_refers) as f32,
+                            1.0,
+                            *alpha as _,
+                        ],
+                        args2: [0.0, 0.0, 0.0, 0.0],
+                    });
+                    (inner, used_refers + 1)
                 } else {
-                    (b_dist, b_meta)
+                    let a = &objects[1];
+                    let b = &objects[2];
+                    let (mut a_inner, used_refers) =
+                        a.to_raw(material, false, true, current_refer_count);
+                    let current_refer_count = current_refer_count + used_refers;
+                    let (b_inner, used_refers_b) =
+                        a.to_raw(material, false, true, current_refer_count);
+                    a_inner.extend(b_inner.into_iter());
+                    let total_used_refers = used_refers + used_refers_b;
+                    a_inner.push(RawObject {
+                        mrrt: [material, is_refered_to as _, is_rendered as _, 4],
+                        args1: [
+                            (current_refer_count) as _,
+                            (current_refer_count + used_refers_b) as _,
+                            used_refers_b as _,
+                            *alpha as _,
+                        ],
+                        args2: [0.0, 0.0, 0.0, 0.0],
+                    });
+                    (a_inner, total_used_refers + 2)
                 }
-            }
-            Object::Max(a, b) => {
-                let (a_dist, a_meta) = a.get_metadata(point, material_lookup);
-                let (b_dist, b_meta) = b.get_metadata(point, material_lookup);
-                if a_dist > b_dist {
-                    (a_dist, a_meta)
-                } else {
-                    (b_dist, b_meta)
-                }
-            }
-            Self::Torus { material, .. } => (
-                self.estimate_distance(point),
-                *material_lookup.get(material).unwrap_or(&BLACK_MATERIAL),
-            ),
-            Self::Smooth { alpha, objects } => {
-                let materials: Vec<_> = objects
-                    .iter()
-                    .map(|o| o.get_metadata(point, material_lookup))
-                    .collect();
-                let distances: Vec<_> = materials.iter().map(|(d, _)| *d).collect();
-                let (final_distance, mut exp_terms) = smooth(&distances, *alpha);
-
-                if *alpha < 0.0 {
-                    exp_terms = exp_terms.into_iter().map(|v| 1.0 / v).collect();
-                }
-                let bottom_sum = exp_terms.iter().sum();
-
-                let roughness = for_single(
-                    materials
-                        .iter()
-                        .map(|(_, m)| m.roughness)
-                        .collect::<Vec<_>>(),
-                    bottom_sum,
-                    &exp_terms,
-                )
-                .clamp(0.0, 1.0);
-                let metalness = for_single(
-                    materials
-                        .iter()
-                        .map(|(_, m)| m.metalness)
-                        .collect::<Vec<_>>(),
-                    bottom_sum,
-                    &exp_terms,
-                )
-                .clamp(0.0, 1.0);
-                let color = for_single(
-                    materials.iter().map(|(_, m)| m.color).collect::<Vec<_>>(),
-                    bottom_sum,
-                    &exp_terms,
-                );
-                let emitance = for_single(
-                    materials
-                        .iter()
-                        .map(|(_, m)| m.emitance)
-                        .collect::<Vec<_>>(),
-                    bottom_sum,
-                    &exp_terms,
-                );
-
-                (
-                    final_distance,
-                    Material {
-                        color,
-                        emitance,
-                        metalness,
-                        roughness,
-                    },
-                )
             }
         }
     }
@@ -221,51 +232,43 @@ impl Object {
 pub struct World {
     pub max_ray_depth: u32,
     pub sky_color: cgmath::Vector3<f64>,
-    pub objects: Vec<Object>,
-    pub materials: HashMap<String, Material>,
+    pub objects: Vec<(Object, Material)>,
 }
 
-static BLACK: cgmath::Vector3<f64> = cgmath::vec3(0.0, 0.0, 0.0);
-static BLACK_MATERIAL: Material = Material {
-    color: BLACK,
-    emitance: BLACK,
-    metalness: 0.0,
-    roughness: 1.0,
-};
-
 impl World {
-    fn estimate_distance(&self, point: cgmath::Point3<f64>) -> f64 {
-        self.objects
-            .iter()
-            .map(|x| x.estimate_distance(point))
-            .reduce(f64::min)
-            .unwrap_or(0.0)
+    fn to_raw(&self) -> (Vec<RawObject>, Vec<RawMaterial>) {
+        let mut materials = vec![];
+        let mut objects = vec![];
+        let mut ref_count = 0;
+        for (object, material) in &self.objects {
+            materials.push(material.to_raw());
+            let (obj_raw, used_refs) =
+                object.to_raw((materials.len() - 1) as _, true, false, ref_count);
+            ref_count += used_refs;
+            objects.extend(obj_raw.into_iter());
+        }
+        (objects, materials)
     }
+}
 
-    fn get_closest_metadata(&self, point: cgmath::Point3<f64>) -> Material {
-        self.objects
-            .iter()
-            .map(|x| x.get_metadata(point, &self.materials))
-            .reduce(|acc, x| if x.0 < acc.0 { x } else { acc })
-            .map(|(_, mat)| mat)
-            .unwrap_or(BLACK_MATERIAL)
-    }
+#[derive(Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+struct RawObject {
+    mrrt: [u32; 4],
+    args1: [f32; 4],
+    args2: [f32; 4],
+}
 
-    fn get_distance_gradient(&self, point: cgmath::Point3<f64>) -> cgmath::Vector3<f64> {
-        let x_neg = self.estimate_distance(point + cgmath::vec3(-0.005, 0.0, 0.0));
-        let x_pos = self.estimate_distance(point + cgmath::vec3(0.005, 0.0, 0.0));
-        let y_neg = self.estimate_distance(point + cgmath::vec3(0.0, -0.005, 0.0));
-        let y_pos = self.estimate_distance(point + cgmath::vec3(0.0, 0.005, 0.0));
-        let z_neg = self.estimate_distance(point + cgmath::vec3(0.0, 0.0, -0.005));
-        let z_pos = self.estimate_distance(point + cgmath::vec3(0.0, 0.0, 0.005));
-        cgmath::vec3(x_pos - x_neg, y_pos - y_neg, z_pos - z_neg)
-    }
+#[derive(Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+struct RawMaterial {
+    color: [f32; 4],
+    emitance: [f32; 4],
+    mrxx: [f32; 4],
 }
 
 // TODO(SpaceCat~Chan): move World to other file
 pub struct PixelRenderer {
-    world: World,
-
     objects_buffer: wgpu::Buffer,
     materials_buffer: wgpu::Buffer,
 
@@ -296,7 +299,7 @@ pub struct PixelRenderer {
 
 impl PixelRenderer {
     fn new(
-        world: World,
+        world: &World,
         render_depth: usize,
         screen_size: (u32, u32),
         device: &mut wgpu::Device,
@@ -406,27 +409,26 @@ impl PixelRenderer {
 
         let total_pixel_count = screen_size.0 as u64 * screen_size.1 as u64;
 
+        let (objects, materials) = world.to_raw();
         // TODO(SpaceCat~Chan): use create_buffer_init to fill these
         // with the actual data from "world" immediatly
-        let objects_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let objects_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("object buffer"),
             // 12 floats,
             // vec4 mrrt
             // vec4 args1
             // vec4 args2
-            size: 4 * 12 * total_pixel_count,
+            contents: bytemuck::cast_slice(&objects[..]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
         });
-        let materials_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let materials_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("material buffer"),
             // 12 floats,
             // vec4 color
             // vec4 emitance
             // vec4 mrxx
-            size: 4 * 12 * 1,
+            contents: bytemuck::cast_slice(&materials[..]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
         });
 
         let marcher_painter_pipeline_layout =
@@ -745,7 +747,6 @@ impl PixelRenderer {
         });
 
         Self {
-            world,
             objects_buffer,
             materials_buffer,
             render_depth,

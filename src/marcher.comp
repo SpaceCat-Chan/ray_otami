@@ -76,9 +76,15 @@ const uint MAX_OBJECTS_REFERED_TO = 8;
 
 uint cur_refer_index = 0;
 float refer_buffer[MAX_OBJECTS_REFERED_TO];
+uint refer_material_buffer[MAX_OBJECTS_REFERED_TO];
+
+
+// i just want my damn multiple return values
+uint material_return;
 
 const uint SPHERE_ID = 0;
 float sdf_sphere(Object self, vec3 position) {
+    material_return = self.mrrt.x;
     vec3 sphere_position = self.args1.xyz;
     float dist = distance(sphere_position, position);
     return dist - self.args1.a;
@@ -86,6 +92,7 @@ float sdf_sphere(Object self, vec3 position) {
 
 const uint BOX_ID = 1;
 float sdf_box(Object self, vec3 position) {
+    material_return = self.mrrt.x;
     vec3 lower_corner = self.args1.xyz;
     vec3 upper_corner = self.args2.xyz;
     vec3 center = (lower_corner + upper_corner) / 2.0;
@@ -105,6 +112,7 @@ float sdf_pos_modulo(Object self, vec3 position) {
 const uint INV_ID = 3;
 float sdf_inv(Object self, vec3 position) {
     float sdf = refer_buffer[uint(self.args1.x)];
+    material_return = refer_material_buffer[uint(self.args1.x)];
     return -sdf;
 }
 
@@ -112,18 +120,31 @@ const uint MAX_ID = 4;
 float sdf_max(Object self, vec3 position) {
     float a1 = refer_buffer[uint(self.args1.x)];
     float a2 = refer_buffer[uint(self.args1.y)];
-    return max(a1,a2);
+    if (a1 > a2) {
+        material_return = refer_material_buffer[uint(self.args1.x)];
+        return a1;
+    } else {
+        material_return = refer_material_buffer[uint(self.args1.y)];
+        return a2;
+    }
 }
 
 const uint MIN_ID = 5;
 float sdf_min(Object self, vec3 position) {
     float a1 = refer_buffer[uint(self.args1.x)];
     float a2 = refer_buffer[uint(self.args1.y)];
-    return min(a1,a2);
+    if (a1 < a2) {
+        material_return = refer_material_buffer[uint(self.args1.x)];
+        return a1;
+    } else {
+        material_return = refer_material_buffer[uint(self.args1.y)];
+        return a2;
+    }
 }
 
 const uint TORUS_ID = 6;
 float sdf_torus(Object self, vec3 position) {
+    material_return = self.mrrt.x;
     vec3 point = self.args1.xyz - position;
     vec3 move_by = point;
     move_by.y = 0;
@@ -167,24 +188,27 @@ float sdf_single(Object self, vec3 position) {
     }
     if(self.mrrt.y != 0) {
         refer_buffer[cur_refer_index] = dist;
+        refer_material_buffer[cur_refer_index] = material_return;
         cur_refer_index++;
     }
     return dist;
 }
 
-// x = distance, y = object index
-vec2 sdf(vec3 position) {
+// x = distance, y = object index, z = material index
+vec3 sdf(vec3 position) {
     cur_refer_index = 0;
     float min_dist;
     uint min_index;
+    uint min_mat_index;
     for(uint cur=0; cur < objects.length(); cur++) {
         float dist = sdf_single(objects[cur], position);
         if(objects[cur].mrrt.z != 0 &&dist < min_dist) {
             min_dist = dist;
             min_index = cur;
+            min_mat_index = material_return;
         }
     }
-    return vec2(min_dist,float(min_index));
+    return vec3(min_dist,float(min_index),float(min_mat_index));
 }
 
 const uint MAX_MARCH = 100;
@@ -194,23 +218,23 @@ const float MAX_DISTANCE = 1e99;
 vec3 final_march_position = vec3(0.0,0.0,0.0);
 vec3 continue_march_from = vec3(0.0,0.0,0.0);
 
-// returns object id + 1, 0 means no hit (god i wish i could have sum types and tuples)
-uint march(vec3 position, vec3 direction) {
+// returns object id + 1 and mat id, 0 means no hit (god i wish i could have sum types and tuples)
+uvec2 march(vec3 position, vec3 direction) {
     for(uint counter=0; counter<MAX_MARCH; counter++) {
-        vec2 ret = sdf(position);
+        vec3 ret = sdf(position);
         float dist = ret.x;
         uint hit = uint(ret.y);
         if(dist > MAX_DISTANCE) {
-            return 0;
+            return uvec2(0,0);
         }
         if(dist < DISTANCE_CUTOFF) {
         final_march_position = position;
-            return hit + 1;
+            return uvec2(hit + 1, uint(ret.z));
         }
         position += direction * dist;
     }
     continue_march_from = position;
-    return 0;
+    return uvec2(0,0);
 }
 
 vec3 find_normal(vec3 position) {
@@ -307,16 +331,22 @@ void main() {
 
     Ray ray = in_rays[curr_index];
     if (ray.direction.w == -1) {
+        HitResult hit_result_obj = {
+            vec4(0,1,0,0),
+            0,
+            0,0,0
+        };
+        hit_results[curr_index] = hit_result_obj;
         Ray error = {
             vec4(-1,-1,-1,-1), vec4(-1,-1,-1,-1)
         };
         out_rays[curr_index] = error;
     }
-    uint hit_result = march(ray.position.xyz, ray.direction.xyz);
-    if (hit_result == 0) {
+    uvec2 hit_result = march(ray.position.xyz, ray.direction.xyz);
+    if (hit_result.x == 0) {
         HitResult hit_result_obj = {
             vec4(0,1,0,0),
-            hit_result,
+            hit_result.x,
             0,0,0
         };
         hit_results[curr_index] = hit_result_obj;
@@ -325,12 +355,12 @@ void main() {
         };
         out_rays[curr_index] = error;
     } else {
-        uint object = hit_result - 1;
+        uint object = hit_result.x - 1;
         vec3 hit_pos = final_march_position;
         vec3 normal = find_normal(hit_pos);
         HitResult hit_result_obj = {
             vec4(normal,0),
-            hit_result,
+            hit_result.y + 1,
             0,0,0
         };
         hit_results[curr_index] = hit_result_obj;
@@ -338,7 +368,7 @@ void main() {
 		vec3 axis = cross(normal, vec3(0, 1, 0));
 		float angle = -acos(dot(normal, vec3(0, 1, 0)));
 		mat4 rotation = rotation3d(axis, angle);
-        Material mat = materials[object];
+        Material mat = materials[hit_result.y];
         float metalness_test = get_rand();
         if (mat.mrxx.y == 1 || metalness_test < mat.mrxx.x) {
             // non-metalic method

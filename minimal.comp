@@ -1,0 +1,9 @@
+#version 450 core
+
+layout(std430, binding = 0) buffer something_buf {
+    uint something[];
+};
+
+void main() {
+    uint test = something.length();
+}

@@ -21,7 +21,7 @@ fn runner() -> color_eyre::Result<()> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_resizable(false)
-        .with_inner_size(winit::dpi::LogicalSize::new(960.0, 960.0))
+        .with_inner_size(winit::dpi::LogicalSize::new(960.0f64, 960.0f64))
         .with_title("hi there")
         .build(&event_loop)?;
 
@@ -45,8 +45,9 @@ fn runner() -> color_eyre::Result<()> {
     ))?;
 
     let winit::dpi::PhysicalSize { width, height } = window.inner_size();
-    let preffered_surface_format = surface
-        .get_preferred_format(&adaptor)
+    let preffered_surface_format = *surface
+        .get_supported_formats(&adaptor)
+        .first()
         .ok_or("failed to get preffered_surface_format")
         .wrap_error()?;
     let surface_config = wgpu::SurfaceConfiguration {
@@ -54,7 +55,7 @@ fn runner() -> color_eyre::Result<()> {
         format: preffered_surface_format,
         width,
         height,
-        present_mode: wgpu::PresentMode::Mailbox,
+        present_mode: wgpu::PresentMode::AutoNoVsync,
     };
     surface.configure(&device, &surface_config);
 
@@ -62,6 +63,8 @@ fn runner() -> color_eyre::Result<()> {
         ron::de::from_reader(std::fs::File::open("shapes.ron").expect("failed to open shapes.ron"))
             .expect("failed to deserialize contents of shapes.ron");
 
+    let _renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
+    /*
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
     let that_one = buffer_contents.clone();
     std::thread::spawn(move || pixel_drawer::render_to_buffer(that_one, (width, height), &world));
@@ -114,4 +117,6 @@ fn runner() -> color_eyre::Result<()> {
         }
         _ => {}
     });
+    */
+    Ok(())
 }

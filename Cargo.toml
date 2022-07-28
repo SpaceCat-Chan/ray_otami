@@ -11,10 +11,12 @@ cgmath = { version = "0.18.0", features = ["serde"] }
 color-eyre = "0.6.0"
 futures = "0.3.18"
 winit = "0.26.0"
-wgpu = {version = "0.13.1", features = ["spirv"]}
+wgpu = {version = "0.13.1", features = ["spirv", "glsl"]}
 env_logger = "0.9"
 rayon = "1.5.1"
 rand = "0.8.4"
 rand_distr = "0.4.2"
 serde = { version = "1.0.136", features = ["derive"] }
 ron = "0.7.0"
+naga = {path = "../naga"}
+

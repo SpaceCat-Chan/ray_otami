@@ -222,9 +222,9 @@ impl World {
         let mut materials = vec![];
         let mut material_map = HashMap::new();
 
-        for (name, material) in self.materials {
+        for (name, material) in &self.materials {
             materials.push(material.to_raw());
-            material_map.insert(name, (materials.len() - 1) as _);
+            material_map.insert(name.clone(), (materials.len() - 1) as _);
         }
 
         let mut objects = vec![];
@@ -285,13 +285,14 @@ pub struct PixelRenderer {
 }
 
 impl PixelRenderer {
-    fn new(
+    pub fn new(
         world: &World,
-        render_depth: usize,
         screen_size: (u32, u32),
-        device: &mut wgpu::Device,
-        queue: &mut wgpu::Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Self {
+        let render_depth = world.max_ray_depth as usize;
+
         let marcher_shader_module =
             device.create_shader_module(wgpu::include_spirv!("marcher.comp.spv"));
         let painter_shader_module =
@@ -470,9 +471,9 @@ impl PixelRenderer {
             });
             hit_result_buffers.push(buffer);
         }
-        let random_data_buffers = vec![];
+        let mut random_data_buffers = vec![];
         let mut random_data_gen = rand::thread_rng();
-        let random_data = vec![0u8; 4 * total_pixel_count as usize];
+        let mut random_data = vec![0u8; 4 * total_pixel_count as usize];
         for _ in 0..(render_depth + 1) {
             random_data_gen.fill_bytes(&mut random_data[..]);
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -758,24 +759,26 @@ impl PixelRenderer {
         }
     }
 
-    fn render(
+    pub fn render(
         &mut self,
         render_to: &wgpu::TextureView,
         device: &mut wgpu::Device,
         queue: &mut wgpu::Queue,
         exposure: f32,
     ) {
-        let recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("raymarch encoder"),
         });
         for index in 0..(self.render_depth + 1) {
-            let pass = recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            let mut pass =
+                recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
             pass.set_pipeline(&self.marcher_pipeline);
             pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
             pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
         }
         for index in (0..(self.render_depth + 1)).rev() {
-            let pass = recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            let mut pass =
+                recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
             pass.set_pipeline(&self.painter_pipeline);
             pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
             pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
@@ -791,7 +794,7 @@ impl PixelRenderer {
             }),
         );
         {
-            let pass = recorder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = recorder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("submitting rendered frame to be collected and shown on screen"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: render_to,

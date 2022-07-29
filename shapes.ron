@@ -1,5 +1,5 @@
 (
-    max_ray_depth: 4,
+    max_ray_depth: 1,
     sky_color: (
         x: 0.529,
         y: 0.808,
@@ -48,7 +48,7 @@
             roughness: 0.75
         ),
         "light": (
-            color: (x: 0, y: 0, z: 0),
+            color: (x: 0, y: 0, z: 1.0),
             emitance: (x: 100, y: 100, z: 100),
             metalness: 0,
             roughness: 0.01

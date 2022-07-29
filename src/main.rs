@@ -39,7 +39,11 @@ fn runner() -> color_eyre::Result<()> {
         &wgpu::DeviceDescriptor {
             label: Some("the gpu, dumbass"),
             features: wgpu::Features::empty(),
-            limits: wgpu::Limits::downlevel_defaults(),
+            limits: wgpu::Limits {
+                max_dynamic_storage_buffers_per_pipeline_layout: 8,
+                max_storage_buffers_per_shader_stage: 8,
+                ..wgpu::Limits::downlevel_defaults()
+            },
         },
         None,
     ))?;
@@ -51,7 +55,7 @@ fn runner() -> color_eyre::Result<()> {
         .ok_or("failed to get preffered_surface_format")
         .wrap_error()?;
     let surface_config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: preffered_surface_format,
         width,
         height,
@@ -63,7 +67,29 @@ fn runner() -> color_eyre::Result<()> {
         ron::de::from_reader(std::fs::File::open("shapes.ron").expect("failed to open shapes.ron"))
             .expect("failed to deserialize contents of shapes.ron");
 
-    let _renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
+    let mut renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
+
+    let texture = surface.get_current_texture()?;
+    renderer.render(
+        &texture.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("texture view for current frame"),
+            format: Some(preffered_surface_format),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        }),
+        &device,
+        &queue,
+        1.0,
+    );
+    texture.present();
+
+    println!("rendered frame");
+
+    std::io::stdin().read_line(&mut String::new()).unwrap();
     /*
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
     let that_one = buffer_contents.clone();

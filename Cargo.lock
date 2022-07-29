@@ -937,21 +937,6 @@ version = "0.9.0"
 dependencies = [
  "bit-set",
  "bitflags",
- "indexmap",
- "log",
- "num-traits",
- "rustc-hash",
- "thiserror",
-]
-
-[[package]]
-name = "naga"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f50357e1167a3ab92d6b3c7f4bf5f7fd13fde3f4b28bf0d5ea07b5100fdb6c0"
-dependencies = [
- "bit-set",
- "bitflags",
  "codespan-reporting",
  "hexf-parse",
  "indexmap",
@@ -1318,7 +1303,7 @@ dependencies = [
  "color-eyre",
  "env_logger",
  "futures",
- "naga 0.9.0",
+ "naga",
  "rand",
  "rand_distr",
  "rayon",
@@ -1794,14 +1779,12 @@ dependencies = [
 
 [[package]]
 name = "wgpu"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "277e967bf8b7820a76852645a6bce8bbd31c32fda2042e82d8e3ea75fda8892d"
+version = "0.13.0"
 dependencies = [
  "arrayvec",
  "js-sys",
  "log",
- "naga 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga",
  "parking_lot 0.12.1",
  "raw-window-handle",
  "smallvec",
@@ -1815,9 +1798,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b92788dec9d0c1bed849a1b83f01b2ee12819bf04a79c90f68e4173f7b5ba2"
+version = "0.13.0"
 dependencies = [
  "arrayvec",
  "bit-vec",
@@ -1827,7 +1808,7 @@ dependencies = [
  "copyless",
  "fxhash",
  "log",
- "naga 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga",
  "parking_lot 0.12.1",
  "profiling",
  "raw-window-handle",
@@ -1840,9 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu-hal"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20cbdfc3d0637dba3d5536b93adef3d26023a0b96f0e1ee5ee9560a401d9f646"
+version = "0.13.0"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -1863,7 +1842,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naga",
  "objc",
  "parking_lot 0.12.1",
  "profiling",
@@ -1879,9 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu-types"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f762cbc08e1a51389859cf9c199c7aef544789cf3510889aab12c607f701604"
+version = "0.13.0"
 dependencies = [
  "bitflags",
 ]

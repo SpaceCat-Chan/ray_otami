@@ -18,6 +18,7 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
     uint buffer_index = uint(buffer_position.x) + uint(buffer_position.y) * frame_width;
+
     vec4 final_color = accumulate[buffer_index] + colors[buffer_index];
     accumulate[buffer_index] = final_color;
     final_color /= render_count;

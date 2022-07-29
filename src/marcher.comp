@@ -197,12 +197,12 @@ float sdf_single(Object self, vec3 position) {
 // x = distance, y = object index, z = material index
 vec3 sdf(vec3 position) {
     cur_refer_index = 0;
-    float min_dist;
-    uint min_index;
+    float min_dist = 1e9;
+    uint min_index = 0;
     uint min_mat_index;
     for(uint cur=0; cur < objects.length(); cur++) {
         float dist = sdf_single(objects[cur], position);
-        if(objects[cur].mrrt.z != 0 &&dist < min_dist) {
+        if(objects[cur].mrrt.z != 0 && dist < min_dist) {
             min_dist = dist;
             min_index = cur;
             min_mat_index = material_return;
@@ -211,20 +211,22 @@ vec3 sdf(vec3 position) {
     return vec3(min_dist,float(min_index),float(min_mat_index));
 }
 
-const uint MAX_MARCH = 100;
-const float DISTANCE_CUTOFF = 1e-5;
-const float MAX_DISTANCE = 1e9;
+const uint MAX_MARCH = 200;
+const float DISTANCE_CUTOFF = 1e-3;
+const float MAX_DISTANCE = 1000;
 
 vec3 final_march_position = vec3(0.0,0.0,0.0);
 vec3 continue_march_from = vec3(0.0,0.0,0.0);
 
 // returns object id + 1 and mat id, 0 means no hit (god i wish i could have sum types and tuples)
 uvec2 march(vec3 position, vec3 direction) {
+    float total_distance = 0.0;
     for(uint counter=0; counter<MAX_MARCH; counter++) {
         vec3 ret = sdf(position);
         float dist = ret.x;
+        total_distance += dist;
         uint hit = uint(ret.y);
-        if(dist > MAX_DISTANCE) {
+        if(total_distance > MAX_DISTANCE) {
             return uvec2(0,0);
         }
         if(dist < DISTANCE_CUTOFF) {
@@ -324,7 +326,8 @@ float inverse_distribution_ggx(float roughness, float value) {
 }
 
 void main() {
-    uint curr_index = gl_WorkGroupID.x;
+    
+    uint curr_index = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
     
     rng_state = rand_deep;
     uint val = rand_pcg();
@@ -368,6 +371,7 @@ void main() {
         // goal: find out what the out going ray should look like
 		vec3 axis = cross(normal, vec3(0, 1, 0));
 		float angle = -acos(dot(normal, vec3(0, 1, 0)));
+        return;
 		mat4 rotation = rotation3d(axis, angle);
         Material mat = materials[hit_result.y];
         float metalness_test = get_rand();

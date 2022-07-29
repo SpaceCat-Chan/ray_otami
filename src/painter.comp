@@ -89,14 +89,16 @@ float geometry_smith(vec3 normal, vec3 view, vec3 light, float roughness) {
 vec4 skybox_color = vec4(1,1,1,1);
 
 void main() {
-    uint curr_index = gl_WorkGroupID.x;
+    uint curr_index = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
     HitResult hit = hit_results[curr_index];
     if(hit.object == 0) {
         in_color[curr_index] = skybox_color;
         return;
     }
-    hit.object -= 1;
-    Material mat = materials[hit.object];
+    Material mat = materials[hit.object - 1];
+
+    in_color[curr_index] = mat.color;//vec4(float(curr_index) / float(gl_NumWorkGroups.x * gl_NumWorkGroups.y), hit.object, 0 ,1);
+    return;
 
     Ray in_going = in_rays[curr_index];
     Ray out_going = in_rays[curr_index];

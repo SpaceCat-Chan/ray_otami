@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     ops::DerefMut,
     sync::{Arc, Mutex},
@@ -145,15 +146,15 @@ impl Object {
             Object::Min(a, b) => {
                 let (mut a_inner, used_refers) =
                     a.to_raw(material_map, false, true, current_refer_count);
-                let current_refer_count = current_refer_count + used_refers;
+                let current_refer_count = current_refer_count + used_refers + 1;
                 let (b_inner, used_refers_b) =
-                    a.to_raw(material_map, false, true, current_refer_count);
+                    b.to_raw(material_map, false, true, current_refer_count);
                 a_inner.extend(b_inner.into_iter());
                 let total_used_refers = used_refers + used_refers_b;
                 a_inner.push(RawObject {
                     mrrt: [0, is_refered_to as _, is_rendered as _, 5],
                     args1: [
-                        (current_refer_count) as _,
+                        (current_refer_count - 1) as _,
                         (current_refer_count + used_refers_b) as _,
                         0.0,
                         0.0,
@@ -165,15 +166,15 @@ impl Object {
             Object::Max(a, b) => {
                 let (mut a_inner, used_refers) =
                     a.to_raw(material_map, false, true, current_refer_count);
-                let current_refer_count = current_refer_count + used_refers;
+                let current_refer_count = current_refer_count + used_refers + 1;
                 let (b_inner, used_refers_b) =
-                    a.to_raw(material_map, false, true, current_refer_count);
+                    b.to_raw(material_map, false, true, current_refer_count);
                 a_inner.extend(b_inner.into_iter());
                 let total_used_refers = used_refers + used_refers_b;
                 a_inner.push(RawObject {
                     mrrt: [0, is_refered_to as _, is_rendered as _, 4],
                     args1: [
-                        (current_refer_count) as _,
+                        (current_refer_count - 1) as _,
                         (current_refer_count + used_refers_b) as _,
                         0.0,
                         0.0,
@@ -227,6 +228,8 @@ impl World {
             material_map.insert(name.clone(), (materials.len() - 1) as _);
         }
 
+        dbg!(&material_map, &materials);
+
         let mut objects = vec![];
         let mut ref_count = 0;
         for object in &self.objects {
@@ -234,11 +237,12 @@ impl World {
             ref_count += used_refs;
             objects.extend(obj_raw.into_iter());
         }
+        dbg!(&objects);
         (objects, materials)
     }
 }
 
-#[derive(Clone, Copy, Zeroable, Pod)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct RawObject {
     mrrt: [u32; 4],
@@ -246,7 +250,7 @@ struct RawObject {
     args2: [f32; 4],
 }
 
-#[derive(Clone, Copy, Zeroable, Pod)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct RawMaterial {
     color: [f32; 4],
@@ -293,10 +297,22 @@ impl PixelRenderer {
     ) -> Self {
         let render_depth = world.max_ray_depth as usize;
 
-        let marcher_shader_module =
-            device.create_shader_module(wgpu::include_spirv!("marcher.comp.spv"));
-        let painter_shader_module =
-            device.create_shader_module(wgpu::include_spirv!("painter.comp.spv"));
+        let marcher_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("marcher shader"),
+            source: wgpu::ShaderSource::Glsl {
+                shader: Cow::Borrowed(include_str!("marcher.comp")),
+                stage: naga::ShaderStage::Compute,
+                defines: HashMap::default(),
+            },
+        });
+        let painter_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("painter shader"),
+            source: wgpu::ShaderSource::Glsl {
+                shader: Cow::Borrowed(include_str!("painter.comp")),
+                stage: naga::ShaderStage::Compute,
+                defines: HashMap::default(),
+            },
+        });
 
         let marcher_painter_bind_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -460,6 +476,27 @@ impl PixelRenderer {
             color_buffers.push(buffer);
         }
 
+        let mut initial_ray_buffer = vec![0.0f32; 8 * total_pixel_count as usize];
+        for pixel_idx in 0..total_pixel_count {
+            let pixel_pos = (
+                pixel_idx % screen_size.0 as u64,
+                pixel_idx / screen_size.0 as u64,
+            );
+            let pixel_pos = (
+                (pixel_pos.0 as f32 / screen_size.0 as f32 - 0.5) * 2.0,
+                -(pixel_pos.1 as f32 / screen_size.1 as f32 - 0.5) * 2.0,
+            );
+            let final_vec = cgmath::vec3(pixel_pos.0, pixel_pos.1, 1.0).normalize();
+            initial_ray_buffer[pixel_idx as usize * 8 + 4] = final_vec.x;
+            initial_ray_buffer[pixel_idx as usize * 8 + 5] = final_vec.y;
+            initial_ray_buffer[pixel_idx as usize * 8 + 6] = final_vec.z;
+        }
+        queue.write_buffer(
+            &ray_buffers[0],
+            0,
+            bytemuck::cast_slice(&initial_ray_buffer[..]),
+        );
+
         let mut hit_result_buffers = vec![];
         for _ in 0..(render_depth + 1) {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -591,23 +628,23 @@ impl PixelRenderer {
         let collector_vertex_input = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vertex input for collector"),
             contents: bytemuck::bytes_of(&[
-                -1.0,
-                -1.0,
+                -0.5,
+                -0.5,
                 0.5,
                 0.0,
                 0.0,
-                1.0,
-                -1.0,
+                0.5,
+                -0.5,
                 0.5,
                 screen_size.0 as f32,
                 0.0,
-                -1.0,
-                1.0,
+                -0.5,
+                0.5,
                 0.5,
                 0.0,
                 screen_size.1 as f32,
-                1.0,
-                1.0,
+                0.5,
+                0.5,
                 0.5,
                 screen_size.0 as f32,
                 screen_size.1 as f32,
@@ -660,9 +697,23 @@ impl PixelRenderer {
             });
 
         let collector_vertex_shader_module =
-            device.create_shader_module(wgpu::include_spirv!("collector.vert.spv"));
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("collector vertex shader"),
+                source: wgpu::ShaderSource::Glsl {
+                    shader: Cow::Borrowed(include_str!("collector.vert")),
+                    stage: naga::ShaderStage::Vertex,
+                    defines: HashMap::default(),
+                },
+            });
         let collector_fragment_shader_module =
-            device.create_shader_module(wgpu::include_spirv!("collector.frag.spv"));
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("collector fragmene shader"),
+                source: wgpu::ShaderSource::Glsl {
+                    shader: Cow::Borrowed(include_str!("collector.frag")),
+                    stage: naga::ShaderStage::Fragment,
+                    defines: HashMap::default(),
+                },
+            });
 
         let collector_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("collector pipeline"),
@@ -695,7 +746,7 @@ impl PixelRenderer {
                 module: &collector_fragment_shader_module,
                 entry_point: "main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -762,8 +813,8 @@ impl PixelRenderer {
     pub fn render(
         &mut self,
         render_to: &wgpu::TextureView,
-        device: &mut wgpu::Device,
-        queue: &mut wgpu::Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         exposure: f32,
     ) {
         let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -774,14 +825,14 @@ impl PixelRenderer {
                 recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
             pass.set_pipeline(&self.marcher_pipeline);
             pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-            pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
+            pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
         }
         for index in (0..(self.render_depth + 1)).rev() {
             let mut pass =
                 recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
             pass.set_pipeline(&self.painter_pipeline);
             pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-            pass.dispatch_workgroups(self.screen_size.0 * self.screen_size.1, 1, 1);
+            pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
         }
         self.render_count += 1;
         queue.write_buffer(
@@ -813,6 +864,7 @@ impl PixelRenderer {
         }
         let render_thing = recorder.finish();
         queue.submit([render_thing].into_iter());
+        device.poll(wgpu::Maintain::Wait);
     }
 }
 

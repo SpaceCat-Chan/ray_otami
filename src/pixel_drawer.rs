@@ -817,23 +817,6 @@ impl PixelRenderer {
         queue: &wgpu::Queue,
         exposure: f32,
     ) {
-        let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("raymarch encoder"),
-        });
-        for index in 0..(self.render_depth + 1) {
-            let mut pass =
-                recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-            pass.set_pipeline(&self.marcher_pipeline);
-            pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-            pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
-        }
-        for index in (0..(self.render_depth + 1)).rev() {
-            let mut pass =
-                recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-            pass.set_pipeline(&self.painter_pipeline);
-            pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-            pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
-        }
         self.render_count += 1;
         queue.write_buffer(
             &self.collector_state_uniform,
@@ -844,6 +827,39 @@ impl PixelRenderer {
                 exposure,
             }),
         );
+        let r: u32 = rand::random();
+        queue.write_buffer(&self.single_random_value, 0, &r.to_le_bytes());
+        let mut march_recorders = vec![];
+        for index in 0..(self.render_depth + 1) {
+            let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("march encoder"),
+            });
+            {
+                let mut pass =
+                    recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                pass.set_pipeline(&self.marcher_pipeline);
+                pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
+                pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
+            }
+            march_recorders.push(recorder.finish());
+        }
+        let mut color_recorders = vec![];
+        for index in (0..(self.render_depth + 1)).rev() {
+            let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("color encoder"),
+            });
+            {
+                let mut pass =
+                    recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                pass.set_pipeline(&self.painter_pipeline);
+                pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
+                pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
+            }
+            color_recorders.push(recorder.finish());
+        }
+        let mut recorder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("collector encoder"),
+        });
         {
             let mut pass = recorder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("submitting rendered frame to be collected and shown on screen"),
@@ -863,7 +879,14 @@ impl PixelRenderer {
             pass.draw(0..4, 0..1);
         }
         let render_thing = recorder.finish();
-        queue.submit([render_thing].into_iter());
+        queue.submit(
+            march_recorders
+                .into_iter()
+                .chain(color_recorders.into_iter())
+                .chain([render_thing].into_iter()),
+        );
+        device.poll(wgpu::Maintain::Wait);
+        device.poll(wgpu::Maintain::Wait);
         device.poll(wgpu::Maintain::Wait);
     }
 }

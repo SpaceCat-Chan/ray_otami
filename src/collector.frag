@@ -24,5 +24,6 @@ void main() {
     final_color /= render_count;
 
     // yay, better hdr mapping, now with +1 sliders to adjust!
-    out_color = vec4(vec3(1) - exp(-final_color.rgb * exposure), 1);
+    //out_color = vec4(vec3(1) - exp(-final_color.rgb * exposure), 1);
+    out_color = vec4(final_color.rgb / (final_color.rgb + vec3(1)),1);
 }

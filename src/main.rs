@@ -69,27 +69,39 @@ fn runner() -> color_eyre::Result<()> {
 
     let mut renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
 
-    let texture = surface.get_current_texture()?;
-    renderer.render(
-        &texture.texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("texture view for current frame"),
-            format: Some(preffered_surface_format),
-            dimension: Some(wgpu::TextureViewDimension::D2),
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
-        }),
-        &device,
-        &queue,
-        1.0,
-    );
-    texture.present();
+    event_loop.run(move |event, _, control| match event {
+        winit::event::Event::WindowEvent {
+            event: winit::event::WindowEvent::CloseRequested,
+            ..
+        } => {
+            *control = winit::event_loop::ControlFlow::Exit;
+        }
+        winit::event::Event::MainEventsCleared => {
+            *control = winit::event_loop::ControlFlow::WaitUntil(
+                std::time::Instant::now().add(std::time::Duration::from_secs_f64(1.0)),
+            );
+            let texture = surface.get_current_texture().unwrap();
+            renderer.render(
+                &texture.texture.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("texture view for current frame"),
+                    format: Some(preffered_surface_format),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    aspect: wgpu::TextureAspect::All,
+                    base_mip_level: 0,
+                    mip_level_count: None,
+                    base_array_layer: 0,
+                    array_layer_count: None,
+                }),
+                &device,
+                &queue,
+                1.0,
+            );
+            texture.present();
+            println!("rendered frame");
+        }
+        _ => {}
+    });
 
-    println!("rendered frame");
-
-    std::io::stdin().read_line(&mut String::new()).unwrap();
     /*
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
     let that_one = buffer_contents.clone();

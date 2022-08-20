@@ -220,8 +220,6 @@ impl World {
             material_map.insert(name.clone(), (materials.len() - 1) as _);
         }
 
-        dbg!(&material_map, &materials);
-
         let mut objects = vec![];
         let mut ref_count = 0;
         for object in &self.objects {
@@ -229,7 +227,6 @@ impl World {
             ref_count += used_refs;
             objects.extend(obj_raw.into_iter());
         }
-        dbg!(&objects);
         (objects, materials)
     }
 }

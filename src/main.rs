@@ -8,6 +8,7 @@ use std::{
 
 use error_extra::*;
 use wgpu::util::DeviceExt;
+use winit::event::MouseScrollDelta;
 
 fn main() {
     match runner() {
@@ -69,12 +70,25 @@ fn runner() -> color_eyre::Result<()> {
 
     let mut renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
 
+    let mut exposure = 1.0;
+
     event_loop.run(move |event, _, control| match event {
         winit::event::Event::WindowEvent {
             event: winit::event::WindowEvent::CloseRequested,
             ..
         } => {
             *control = winit::event_loop::ControlFlow::Exit;
+        }
+        winit::event::Event::WindowEvent {
+            event:
+                winit::event::WindowEvent::MouseWheel {
+                    delta: MouseScrollDelta::LineDelta(_, y),
+                    ..
+                },
+            ..
+        } => {
+            exposure *= 1.1f32.powf(y);
+            println!("new exposure: {}", exposure)
         }
         winit::event::Event::MainEventsCleared => {
             *control = winit::event_loop::ControlFlow::WaitUntil(
@@ -94,10 +108,9 @@ fn runner() -> color_eyre::Result<()> {
                 }),
                 &device,
                 &queue,
-                1.0,
+                exposure,
             );
             texture.present();
-            println!("rendered frame");
         }
         _ => {}
     });

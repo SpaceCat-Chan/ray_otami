@@ -247,16 +247,47 @@ vec3 find_normal(vec3 position) {
     ));
 }
 
-// stolen from somewhere, like hell i'm gonna try to figure out how to do that
-mat4 rotation3d(vec3 axis, float angle) {
-    float s = sin(angle); // 0
-    float c = cos(angle); // 1
-    float oc = 1.0 - c; // 0
-    
-    return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
-                oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
-                oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
-                0.0,                                0.0,                                0.0,                                1.0);
+// fuck you, i made this one myself
+mat4 make_rotation(vec3 from, vec3 to) {
+    if((from + to) == vec3(0,0,0)) {
+        // the "to" vector is always (0,1,0), so this is fine
+        return mat4(
+            -1, 0, 0, 0,
+             0,-1, 0, 0,
+             0, 0, 1, 0,
+             0, 0, 0, 1
+        );
+    }
+    vec3 halfway = normalize(from + to);
+
+    float scal = from.x * halfway.x + from.y * halfway.y + from.z * halfway.z;
+    float xy = from.x * halfway.y - from.y * halfway.x;
+    float xz = from.x * halfway.z - from.z * halfway.x;
+    float yz = from.y * halfway.z - from.z * halfway.y;
+
+
+    float x2 = yz + yz;
+    float y2 = xz + xz;
+    float z2 = xy + xy;
+
+    float xx2 = x2 * yz;
+    float xy2 = x2 * xz;
+    float xz2 = x2 * xy;
+
+    float yy2 = y2 * xz;
+    float yz2 = y2 * xy;
+    float zz2 = z2 * xy;
+
+    float sy2 = y2 * scal;
+    float sz2 = z2 * scal;
+    float sx2 = x2 * scal;
+
+    return mat4(
+        1 - yy2 - zz2, xy2 + sz2, xz2 - sy2, 0,
+        xy2 - sz2, 1 - xx2 - zz2, yz2 + sx2, 0,
+        xz2 + sy2, yz2 - sx2, 1 - xx2 - yy2, 0,
+        0,         0,         0,             1
+    );
 }
 
 uint rng_state;
@@ -367,9 +398,7 @@ void main() {
         };
         hit_results[curr_index] = hit_result_obj;
         // goal: find out what the out going ray should look like
-		vec3 axis = cross(normal,vec3(0, 1, 0));
-		float angle = acos(dot(normal,vec3(0, 1, 0)));
-		mat4 rotation = rotation3d(axis, angle);
+		mat4 rotation = make_rotation(vec3(0,1,0), normal);
         Material mat = materials[hit_result.y];
         float metalness_test = get_rand();
         if (mat.mrxx.y == 1 || metalness_test > mat.mrxx.x) {
@@ -404,9 +433,9 @@ void main() {
                 float cos_angle = inverse_distribution_ggx(mat.mrxx.y, rand_val);
                 float sin_angle = sqrt(1 - cos_angle * cos_angle);
                 float theta = get_rand() * 2 * PI;
-                vec3 halfway = vec3(cos(theta) * sin_angle, cos_angle, sin(theta) * sin_angle);
-                vec3 dir = (-ray.direction.xyz) - dot(halfway, -ray.direction.xyz) * 2 * halfway;
-                dir = (rotation * vec4(dir,0)).xyz;
+                vec3 halfway = normalize(vec3(cos(theta) * sin_angle, cos_angle, sin(theta) * sin_angle));
+                halfway = (rotation * vec4(halfway,0)).xyz;
+                vec3 dir = reflect(ray.direction.xyz, halfway);
                 Ray res = {
                     vec4(continue_from, 0),
                     vec4(dir, 1),

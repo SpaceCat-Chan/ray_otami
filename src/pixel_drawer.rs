@@ -1,16 +1,8 @@
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    ops::DerefMut,
-    sync::{Arc, Mutex},
-    thread::spawn,
-};
+use std::{borrow::Cow, collections::HashMap};
 
 use bytemuck::{Pod, Zeroable};
 use cgmath::prelude::*;
 use rand::RngCore;
-use rand_distr::Distribution;
-use rayon::iter::{ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
@@ -23,7 +15,7 @@ pub struct Material {
 }
 
 impl Material {
-    fn to_raw(&self) -> RawMaterial {
+    fn as_raw(&self) -> RawMaterial {
         RawMaterial {
             color: [
                 self.color.x as f32,
@@ -224,7 +216,7 @@ impl World {
         let mut material_map = HashMap::new();
 
         for (name, material) in &self.materials {
-            materials.push(material.to_raw());
+            materials.push(material.as_raw());
             material_map.insert(name.clone(), (materials.len() - 1) as _);
         }
 

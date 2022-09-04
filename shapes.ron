@@ -1,5 +1,5 @@
 (
-    max_ray_depth: 2,
+    max_ray_depth: 6,
     sky_color: (
         x: 0.529,
         y: 0.808,

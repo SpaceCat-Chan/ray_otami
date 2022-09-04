@@ -117,7 +117,7 @@ fn runner() -> color_eyre::Result<()> {
         }
         winit::event::Event::MainEventsCleared => {
             *control = winit::event_loop::ControlFlow::WaitUntil(
-                std::time::Instant::now().add(std::time::Duration::from_secs_f64(0.75)),
+                std::time::Instant::now().add(std::time::Duration::from_secs_f64(0.25)),
             );
             let texture = surface.get_current_texture().unwrap();
             renderer.render(

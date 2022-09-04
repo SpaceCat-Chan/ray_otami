@@ -1,5 +1,6 @@
 mod error_extra;
 mod pixel_drawer;
+mod world;
 
 use std::{
     ops::Add,

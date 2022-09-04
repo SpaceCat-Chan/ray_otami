@@ -1,234 +1,188 @@
 use std::{borrow::Cow, collections::HashMap};
 
+use crate::world;
 use bytemuck::{Pod, Zeroable};
 use cgmath::prelude::*;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
-pub struct Material {
-    pub color: cgmath::Vector3<f64>,
-    pub emitance: cgmath::Vector3<f64>,
-    pub metalness: f64,
-    pub roughness: f64,
-}
-
-impl Material {
-    fn as_raw(&self) -> RawMaterial {
-        RawMaterial {
-            color: [
-                self.color.x as f32,
-                self.color.y as f32,
-                self.color.z as f32,
-                0.0,
-            ],
-            emitance: [
-                self.emitance.x as f32,
-                self.emitance.y as f32,
-                self.emitance.z as f32,
-                0.0,
-            ],
-            mrxx: [self.metalness as f32, self.roughness as f32, 0.0, 0.0],
-        }
+fn material_to_raw(mat: &world::Material) -> RawMaterial {
+    RawMaterial {
+        color: [
+            mat.color.x as f32,
+            mat.color.y as f32,
+            mat.color.z as f32,
+            0.0,
+        ],
+        emitance: [
+            mat.emitance.x as f32,
+            mat.emitance.y as f32,
+            mat.emitance.z as f32,
+            0.0,
+        ],
+        mrxx: [mat.metalness as f32, mat.roughness as f32, 0.0, 0.0],
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum Object {
-    Sphere {
-        center: cgmath::Point3<f64>,
-        radius: f64,
-        material: String,
-    },
-    Box {
-        lower_corner: cgmath::Point3<f64>,
-        upper_corner: cgmath::Point3<f64>,
-        material: String,
-    },
-    PosModulo(Box<Object>, f64),
-    Inv(Box<Object>),
-    Min(Box<Object>, Box<Object>),
-    Max(Box<Object>, Box<Object>),
-    Torus {
-        major_radius: f64,
-        minor_radius: f64,
-        center: cgmath::Point3<f64>,
-        material: String,
-    },
-}
-
-impl Object {
-    fn to_raw(
-        &self,
-        material_map: &HashMap<String, u32>,
-        is_rendered: bool,
-        is_refered_to: bool,
-        current_refer_count: u32,
-    ) -> (Vec<RawObject>, u32) {
-        match self {
-            Object::Sphere {
-                center,
-                radius,
-                material,
-            } => (
-                vec![RawObject {
-                    mrrt: [
-                        material_map[material],
-                        is_refered_to as _,
-                        is_rendered as _,
-                        0,
-                    ],
-                    args1: [
-                        center.x as f32,
-                        center.y as f32,
-                        center.z as f32,
-                        *radius as f32,
-                    ],
-                    args2: [0.0, 0.0, 0.0, 0.0],
-                }],
-                0,
-            ),
-            Object::Box {
-                lower_corner,
-                upper_corner,
-                material,
-            } => (
-                vec![RawObject {
-                    mrrt: [
-                        material_map[material],
-                        is_refered_to as _,
-                        is_rendered as _,
-                        1,
-                    ],
-                    args1: [
-                        lower_corner.x as f32,
-                        lower_corner.y as f32,
-                        lower_corner.z as f32,
-                        0.0,
-                    ],
-                    args2: [
-                        upper_corner.x as f32,
-                        upper_corner.y as f32,
-                        upper_corner.z as f32,
-                        0.0,
-                    ],
-                }],
-                0,
-            ),
-            Object::PosModulo(_, _) => (
-                // this one can't be implemented on the gpu just yet
-                vec![RawObject {
-                    mrrt: [0, 0, 0, 2],
-                    args1: [0.0, 0.0, 0.0, 0.0],
-                    args2: [0.0, 0.0, 0.0, 0.0],
-                }],
-                0,
-            ),
-            Object::Inv(inverted) => {
-                let (mut inner, used_refers) =
-                    inverted.to_raw(material_map, false, true, current_refer_count);
-                inner.push(RawObject {
-                    mrrt: [0, is_refered_to as _, is_rendered as _, 3],
-                    args1: [(current_refer_count + used_refers) as f32, 0.0, 0.0, 0.0],
-                    args2: [0.0, 0.0, 0.0, 0.0],
-                });
-                (inner, used_refers + 1)
-            }
-            Object::Min(a, b) => {
-                let (mut a_inner, used_refers) =
-                    a.to_raw(material_map, false, true, current_refer_count);
-                let current_refer_count = current_refer_count + used_refers + 1;
-                let (b_inner, used_refers_b) =
-                    b.to_raw(material_map, false, true, current_refer_count);
-                a_inner.extend(b_inner.into_iter());
-                let total_used_refers = used_refers + used_refers_b;
-                a_inner.push(RawObject {
-                    mrrt: [0, is_refered_to as _, is_rendered as _, 5],
-                    args1: [
-                        (current_refer_count - 1) as _,
-                        (current_refer_count + used_refers_b) as _,
-                        0.0,
-                        0.0,
-                    ],
-                    args2: [0.0, 0.0, 0.0, 0.0],
-                });
-                (a_inner, total_used_refers + 2)
-            }
-            Object::Max(a, b) => {
-                let (mut a_inner, used_refers) =
-                    a.to_raw(material_map, false, true, current_refer_count);
-                let current_refer_count = current_refer_count + used_refers + 1;
-                let (b_inner, used_refers_b) =
-                    b.to_raw(material_map, false, true, current_refer_count);
-                a_inner.extend(b_inner.into_iter());
-                let total_used_refers = used_refers + used_refers_b;
-                a_inner.push(RawObject {
-                    mrrt: [0, is_refered_to as _, is_rendered as _, 4],
-                    args1: [
-                        (current_refer_count - 1) as _,
-                        (current_refer_count + used_refers_b) as _,
-                        0.0,
-                        0.0,
-                    ],
-                    args2: [0.0, 0.0, 0.0, 0.0],
-                });
-                (a_inner, total_used_refers + 2)
-            }
-            Object::Torus {
-                major_radius,
-                minor_radius,
-                center,
-                material,
-            } => (
-                vec![RawObject {
-                    mrrt: [
-                        material_map[material],
-                        is_refered_to as _,
-                        is_rendered as _,
-                        6,
-                    ],
-                    args1: [
-                        center.x as _,
-                        center.y as _,
-                        center.z as _,
-                        *major_radius as _,
-                    ],
-                    args2: [*minor_radius as _, 0.0, 0.0, 0.0],
-                }],
-                0,
-            ),
+fn object_to_raw(
+    obj: &world::Object,
+    material_map: &HashMap<String, u32>,
+    is_rendered: bool,
+    is_refered_to: bool,
+    current_refer_count: u32,
+) -> (Vec<RawObject>, u32) {
+    match obj {
+        world::Object::Sphere {
+            center,
+            radius,
+            material,
+        } => (
+            vec![RawObject {
+                mrrt: [
+                    material_map[material],
+                    is_refered_to as _,
+                    is_rendered as _,
+                    0,
+                ],
+                args1: [
+                    center.x as f32,
+                    center.y as f32,
+                    center.z as f32,
+                    *radius as f32,
+                ],
+                args2: [0.0, 0.0, 0.0, 0.0],
+            }],
+            0,
+        ),
+        world::Object::Box {
+            lower_corner,
+            upper_corner,
+            material,
+        } => (
+            vec![RawObject {
+                mrrt: [
+                    material_map[material],
+                    is_refered_to as _,
+                    is_rendered as _,
+                    1,
+                ],
+                args1: [
+                    lower_corner.x as f32,
+                    lower_corner.y as f32,
+                    lower_corner.z as f32,
+                    0.0,
+                ],
+                args2: [
+                    upper_corner.x as f32,
+                    upper_corner.y as f32,
+                    upper_corner.z as f32,
+                    0.0,
+                ],
+            }],
+            0,
+        ),
+        world::Object::PosModulo(_, _) => (
+            // this one can't be implemented on the gpu just yet
+            vec![RawObject {
+                mrrt: [0, 0, 0, 2],
+                args1: [0.0, 0.0, 0.0, 0.0],
+                args2: [0.0, 0.0, 0.0, 0.0],
+            }],
+            0,
+        ),
+        world::Object::Inv(inverted) => {
+            let (mut inner, used_refers) =
+                object_to_raw(inverted, material_map, false, true, current_refer_count);
+            inner.push(RawObject {
+                mrrt: [0, is_refered_to as _, is_rendered as _, 3],
+                args1: [(current_refer_count + used_refers) as f32, 0.0, 0.0, 0.0],
+                args2: [0.0, 0.0, 0.0, 0.0],
+            });
+            (inner, used_refers + 1)
         }
+        world::Object::Min(a, b) => {
+            let (mut a_inner, used_refers) =
+                object_to_raw(a, material_map, false, true, current_refer_count);
+            let current_refer_count = current_refer_count + used_refers + 1;
+            let (b_inner, used_refers_b) =
+                object_to_raw(b, material_map, false, true, current_refer_count);
+            a_inner.extend(b_inner.into_iter());
+            let total_used_refers = used_refers + used_refers_b;
+            a_inner.push(RawObject {
+                mrrt: [0, is_refered_to as _, is_rendered as _, 5],
+                args1: [
+                    (current_refer_count - 1) as _,
+                    (current_refer_count + used_refers_b) as _,
+                    0.0,
+                    0.0,
+                ],
+                args2: [0.0, 0.0, 0.0, 0.0],
+            });
+            (a_inner, total_used_refers + 2)
+        }
+        world::Object::Max(a, b) => {
+            let (mut a_inner, used_refers) =
+                object_to_raw(a, material_map, false, true, current_refer_count);
+            let current_refer_count = current_refer_count + used_refers + 1;
+            let (b_inner, used_refers_b) =
+                object_to_raw(b, material_map, false, true, current_refer_count);
+            a_inner.extend(b_inner.into_iter());
+            let total_used_refers = used_refers + used_refers_b;
+            a_inner.push(RawObject {
+                mrrt: [0, is_refered_to as _, is_rendered as _, 4],
+                args1: [
+                    (current_refer_count - 1) as _,
+                    (current_refer_count + used_refers_b) as _,
+                    0.0,
+                    0.0,
+                ],
+                args2: [0.0, 0.0, 0.0, 0.0],
+            });
+            (a_inner, total_used_refers + 2)
+        }
+        world::Object::Torus {
+            major_radius,
+            minor_radius,
+            center,
+            material,
+        } => (
+            vec![RawObject {
+                mrrt: [
+                    material_map[material],
+                    is_refered_to as _,
+                    is_rendered as _,
+                    6,
+                ],
+                args1: [
+                    center.x as _,
+                    center.y as _,
+                    center.z as _,
+                    *major_radius as _,
+                ],
+                args2: [*minor_radius as _, 0.0, 0.0, 0.0],
+            }],
+            0,
+        ),
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct World {
-    pub max_ray_depth: u32,
-    pub sky_color: cgmath::Vector3<f64>,
-    pub objects: Vec<Object>,
-    pub materials: HashMap<String, Material>,
-}
+fn world_to_raw(world: &world::World) -> (Vec<RawObject>, Vec<RawMaterial>) {
+    let mut materials = vec![];
+    let mut material_map = HashMap::new();
 
-impl World {
-    fn to_raw(&self) -> (Vec<RawObject>, Vec<RawMaterial>) {
-        let mut materials = vec![];
-        let mut material_map = HashMap::new();
-
-        for (name, material) in &self.materials {
-            materials.push(material.as_raw());
-            material_map.insert(name.clone(), (materials.len() - 1) as _);
-        }
-
-        let mut objects = vec![];
-        let mut ref_count = 0;
-        for object in &self.objects {
-            let (obj_raw, used_refs) = object.to_raw(&material_map, true, false, ref_count);
-            ref_count += used_refs;
-            objects.extend(obj_raw.into_iter());
-        }
-        (objects, materials)
+    for (name, material) in &world.materials {
+        materials.push(material_to_raw(material));
+        material_map.insert(name.clone(), (materials.len() - 1) as _);
     }
+
+    let mut objects = vec![];
+    let mut ref_count = 0;
+    for object in &world.objects {
+        let (obj_raw, used_refs) = object_to_raw(object, &material_map, true, false, ref_count);
+        ref_count += used_refs;
+        objects.extend(obj_raw.into_iter());
+    }
+    (objects, materials)
 }
 
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
@@ -279,7 +233,7 @@ pub struct PixelRenderer {
 
 impl PixelRenderer {
     pub fn new(
-        world: &World,
+        world: &world::World,
         screen_size: (u32, u32),
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -402,7 +356,7 @@ impl PixelRenderer {
 
         let total_pixel_count = screen_size.0 as u64 * screen_size.1 as u64;
 
-        let (objects, materials) = world.to_raw();
+        let (objects, materials) = world_to_raw(world);
         // TODO(SpaceCat~Chan): use create_buffer_init to fill these
         // with the actual data from "world" immediatly
         let objects_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

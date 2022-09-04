@@ -18,6 +18,21 @@ fn main() {
 
 fn runner() -> color_eyre::Result<()> {
     env_logger::init();
+
+    let world_filename = std::env::args().nth(1);
+    let world_filename = match &world_filename {
+        Some(s) => s.as_str(),
+        None => {
+            println!("no filename given, assuming shapes.ron was meant");
+            "shapes.ron"
+        }
+    };
+
+    let world = ron::de::from_reader(
+        std::fs::File::open(world_filename).expect("failed to open shapes file"),
+    )
+    .expect("failed to deserialize contents of shapes file");
+
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_resizable(false)
@@ -57,10 +72,6 @@ fn runner() -> color_eyre::Result<()> {
         present_mode: wgpu::PresentMode::Mailbox,
     };
     surface.configure(&device, &surface_config);
-
-    let world =
-        ron::de::from_reader(std::fs::File::open("shapes.ron").expect("failed to open shapes.ron"))
-            .expect("failed to deserialize contents of shapes.ron");
 
     let buffer_contents = Arc::new(Mutex::new(vec![0; (width * height * 4) as _]));
     let that_one = buffer_contents.clone();

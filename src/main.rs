@@ -87,6 +87,19 @@ fn runner() -> color_eyre::Result<()> {
         winit::event::Event::WindowEvent {
             event: winit::event::WindowEvent::CloseRequested,
             ..
+        }
+        | winit::event::Event::WindowEvent {
+            event:
+                winit::event::WindowEvent::KeyboardInput {
+                    input:
+                        winit::event::KeyboardInput {
+                            state: winit::event::ElementState::Pressed,
+                            virtual_keycode: Some(winit::event::VirtualKeyCode::Escape),
+                            ..
+                        },
+                    ..
+                },
+            ..
         } => {
             *control = winit::event_loop::ControlFlow::Exit;
         }

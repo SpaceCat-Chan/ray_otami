@@ -1,75 +1,239 @@
 (
-    max_ray_depth: 4,
+    max_ray_depth: 3,
     sky_color: (
         x: 0.529,
         y: 0.808,
         z: 0.98
     ),
     objects: [
-        Max(
-            Sphere(
-                center: (x: 0, y: 0, z: 2),
-                radius: 0.5,
-                material: "main_circle"
-            ),
-            Inv(Box(
-                lower_corner: (x: -0.15, y: -0.15, z: 1.45),
-                upper_corner: (x: 0.15, y: 0.15, z: 2.55),
-                material: "main_circle_interior"
-            ))
+        Box(
+            lower_corner: (x: -11.0, y: -11.0, z: 0.0),
+            upper_corner: (x: -10.0, y: 16.0, z: 50.0),
+            material: "walls",
         ),
         Box(
-            lower_corner: (x: -5, y: -5, z: 5),
-            upper_corner: (x: 5, y: 5, z: 5.5),
-            material:"background_wall"
+            lower_corner: (x: 10.0, y: -11.0, z: 0.0),
+            upper_corner: (x: 11.0, y: 16.0, z: 50.0),
+            material: "walls",
         ),
         Box(
-            lower_corner: (x: -5, y: 0.5, z: 0),
-            upper_corner: (x: 5, y: 1.5, z: 5.5),
-            material:"red_mirror"
+            lower_corner: (x: -11.0, y: -11.0, z: 0.0),
+            upper_corner: (x: 11.0, y: -10.0, z: 50.0),
+            material: "walls",
         ),
-        Sphere(
-            center: (x: 0.5, y: 0, z: 1),
-            radius: 0.25,
-            material: "light"
+        Box(
+            lower_corner: (x: -11.0, y: 15.0, z: 0.0),
+            upper_corner: (x: 11.0, y: 16.0, z: 50.0),
+            material: "walls",
+        ),
+        Box(
+            lower_corner: (x: -11.0, y: -11.0, z: 50.0),
+            upper_corner: (x: 11.0, y: 16.0, z: 51.0),
+            material: "walls",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 0.0),
+            upper_corner: (x: -9.5, y: -9.5, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 0.0),
+            upper_corner: (x: 10.0, y: -9.5, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: 14.5, z: 0.0),
+            upper_corner: (x: -9.5, y: 15.0, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: 14.5, z: 0.0),
+            upper_corner: (x: 10.0, y: 15.0, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 10.0),
+            upper_corner: (x: -9.5, y: 15.0, z: 10.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 10.0),
+            upper_corner: (x: 10.0, y: 15.0, z: 10.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 20.0),
+            upper_corner: (x: -9.5, y: 15.0, z: 20.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 20.0),
+            upper_corner: (x: 10.0, y: 15.0, z: 20.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 30.0),
+            upper_corner: (x: -9.5, y: 15.0, z: 30.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 30.0),
+            upper_corner: (x: 10.0, y: 15.0, z: 30.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 40.0),
+            upper_corner: (x: -9.5, y: 15.0, z: 40.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 40.0),
+            upper_corner: (x: 10.0, y: 15.0, z: 40.5),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 49.5),
+            upper_corner: (x: -9.5, y: 15.0, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: 9.5, y: -10.0, z: 49.5),
+            upper_corner: (x: 10.0, y: 15.0, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: 14.5, z: 49.5),
+            upper_corner: (x: 10.0, y: 15.0, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -10.0, z: 49.5),
+            upper_corner: (x: 10.0, y: -9.5, z: 50.0),
+            material: "wall_highlights",
+        ),
+        Box(
+            lower_corner: (x: -1.0, y: -10.0, z: 10.0),
+            upper_corner: (x: 1.0, y: -9.6, z: 15.0),
+            material: "lamp_fitting",
+        ),
+        Box(
+            lower_corner: (x: -0.7, y: -10.0, z: 10.3),
+            upper_corner: (x: 0.7, y: -9.55, z: 14.7),
+            material: "lamp",
+        ),
+        Box(
+            lower_corner: (x: -1.0, y: -10.0, z: 25.0),
+            upper_corner: (x: 1.0, y: -9.6, z: 30.0),
+            material: "lamp_fitting",
+        ),
+        Box(
+            lower_corner: (x: -0.7, y: -10.0, z: 25.3),
+            upper_corner: (x: 0.7, y: -9.55, z: 29.7),
+            material: "lamp",
+        ),
+        Box(
+            lower_corner: (x: -1.0, y: -10.0, z: 40.0),
+            upper_corner: (x: 1.0, y: -9.6, z: 45.0),
+            material: "lamp_fitting",
+        ),
+        Box(
+            lower_corner: (x: -0.7, y: -10.0, z: 40.3),
+            upper_corner: (x: 0.7, y: -9.55, z: 44.7),
+            material: "lamp",
+        ),
+        Box(
+            lower_corner: (x: -1.5, y: 14.99, z: 15.0),
+            upper_corner: (x: 1.5, y: 15.0, z: 50.0),
+            material: "floor_line",
+        ),
+        Box(
+            lower_corner: (x: -4.0, y: -5.0, z: 49.9),
+            upper_corner: (x: 4.0, y: 15.0, z: 50.0),
+            material: "room_end_portal",
+        ),
+        Box(
+            lower_corner: (x: -4.5, y: -5.5, z: 49.7),
+            upper_corner: (x: -4.0, y: 15.5, z: 50.0),
+            material: "orange_portal_outline",
+        ),
+        Box(
+            lower_corner: (x: 4.0, y: -5.5, z: 49.7),
+            upper_corner: (x: 4.5, y: 15.5, z: 50.0),
+            material: "orange_portal_outline",
+        ),
+        Box(
+            lower_corner: (x: -4.5, y: -5.5, z: 49.7),
+            upper_corner: (x: 4.5, y: -5.0, z: 50.0),
+            material: "orange_portal_outline",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -5.0, z: 21.25),
+            upper_corner: (x: -9.9, y: 15.0, z: 29.25),
+            material: "room_side_portal",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -5.5, z: 20.75),
+            upper_corner: (x: -9.7, y: 15.5, z: 21.25),
+            material: "blue_portal_outline",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -5.5, z: 29.25),
+            upper_corner: (x: -9.7, y: 15.5, z: 29.75),
+            material: "blue_portal_outline",
+        ),
+        Box(
+            lower_corner: (x: -10.0, y: -5.5, z: 20.75),
+            upper_corner: (x: -9.7, y: -5.0, z: 29.75),
+            material: "blue_portal_outline",
         ),
     ],
     materials: {
-        "main_circle": (
-            color: (x: 0.5, y: 1, z: 0.5),
-            emitance: (x: 0 ,y: 0, z: 0),
-            metalness: 0,
-            roughness: 0.1
+        "walls": (
+            color: (x: 0.9, y: 0.9, z: 0.9),
+            roughness: 1.0,
         ),
-        "main_circle_interior": (
-            color: (x: 0, y: 1, z: 1),
-            emitance: (x: 0, y: 0, z: 0),
-            metalness: 0,
-            roughness: 0.75
+        "wall_highlights": (
+            color: (x: 0.005, y: 0.005, z: 0.005),
+            roughness: 1.0,
         ),
-        "light": (
-            color: (x: 0, y: 0, z: 0),
-            emitance: (x: 100, y: 100, z: 100),
-            metalness: 0,
-            roughness: 0.01
+        "lamp_fitting": (
+            color: (x: 0.05, y: 0.05, z: 0.05),
+            roughness: 1.0,
         ),
-        "red_mirror": (
-            color: (x: 1, y: 0, z: 0),
-            emitance: (x: 0, y: 0, z: 0),
-            metalness: 1,
-            roughness: 0.02
+        "lamp": (
+            emitance: (x: 20.0, y: 20.0, z: 20.0),
+            roughness: 1.0,
         ),
-        "background_wall": (
-            color: (x: 0, y: 1, z: 0),
-            emitance: (x: 0, y: 0, z: 0),
-            metalness: 0,
-            roughness: 0.7
+        "floor_line": (
+            color: (x: 0.92, y: 0.36, z: 0.20),
+            roughness: 0.4,
         ),
-        "torus": (
-            color: (x: 1, y: 0, z: 1),
-            emitance: (x: 0, y: 0, z: 0),
-            metalness: 0,
-            roughness: 0.75
+        "room_end_portal": (
+            color: (x: 1.0, y: 1.0, z: 1.0),
+            roughness: 0.4,
+            is_portal: true,
+            translation: (x: -9.8, y: 0, z: -24.65),
+            rotate_around: (x: 0.0, y: 5.0, z: 49.9),
+            rotation: (from: (x: 0, y: 0, z: 1), to: (x: 1, y: 0, z: 0))
+        ),
+        "room_side_portal": (
+            color: (x: 1.0, y: 1.0, z: 1.0),
+            roughness: 0.4,
+            is_portal: true,
+            translation: (x: 9.9, y: 0, z: 24.55),
+            rotate_around: (x: -9.9, y: 5.0, z: 25.25),
+            rotation: (from: (x: 1, y: 0, z: 0), to: (x: 0, y: 0, z: 1))
+        ),
+        "orange_portal_outline": (
+            color : (x: 0, y: 0, z: 0),
+            emitance: (x: 1.7, y: 0.20, z: 0.05),
+            roughness: 0.4,
+            metalness: 1.0,
+        ),
+        "blue_portal_outline": (
+            emitance: (x: 0.0, y: 0.0, z: 1.8),
+            roughness: 0.4,
+            metalness: 1.0,
         )
     }
 )

@@ -7,20 +7,38 @@ use rand::RngCore;
 use wgpu::util::DeviceExt;
 
 fn material_to_raw(mat: &world::Material) -> RawMaterial {
+    let rotation = cgmath::Quaternion::from_arc(mat.rotation.from, mat.rotation.to, None);
     RawMaterial {
         color: [
             mat.color.x as f32,
             mat.color.y as f32,
             mat.color.z as f32,
-            0.0,
+            mat.translation.x as f32,
         ],
         emitance: [
             mat.emitance.x as f32,
             mat.emitance.y as f32,
             mat.emitance.z as f32,
+            mat.translation.y as f32,
+        ],
+        mrpx: [
+            mat.metalness as f32,
+            mat.roughness as f32,
+            mat.is_portal as i32 as f32,
+            mat.translation.z as f32,
+        ],
+        rotate_around: [
+            mat.rotate_around.x as f32,
+            mat.rotate_around.y as f32,
+            mat.rotate_around.z as f32,
             0.0,
         ],
-        mrxx: [mat.metalness as f32, mat.roughness as f32, 0.0, 0.0],
+        rotation: [
+            rotation.v.x as f32,
+            rotation.v.y as f32,
+            rotation.v.z as f32,
+            rotation.s as f32,
+        ],
     }
 }
 
@@ -196,9 +214,12 @@ struct RawObject {
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct RawMaterial {
+    // portal translation is packed into the last element of each of the first three elements lol
     color: [f32; 4],
     emitance: [f32; 4],
-    mrxx: [f32; 4],
+    mrpx: [f32; 4],
+    rotate_around: [f32; 4],
+    rotation: [f32; 4],
 }
 
 // TODO(SpaceCat~Chan): move World to other file

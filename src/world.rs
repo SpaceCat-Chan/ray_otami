@@ -1,11 +1,16 @@
+use cgmath::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Material {
+    #[serde(default = "cgmath::Vector3::<f64>::zero")]
     pub color: cgmath::Vector3<f64>,
+    #[serde(default = "cgmath::Vector3::<f64>::zero")]
     pub emitance: cgmath::Vector3<f64>,
+    #[serde(default)]
     pub metalness: f64,
+    #[serde(default)]
     pub roughness: f64,
 }
 

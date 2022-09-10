@@ -12,13 +12,10 @@ color-eyre = "0.6.0"
 futures = "0.3.18"
 winit = "0.27.2"
 # needs to use custom version of naga, because the one released doesn't support .length() in glsl
-wgpu = {path = "../wgpu/wgpu", features = ["spirv", "glsl"]}
+wgpu = {path = "../wgpu/wgpu", features = ["glsl"]}
 env_logger = "0.9"
-rayon = "1.5.1"
 rand = "0.8.4"
-rand_distr = "0.4.2"
 serde = { version = "1.0.136", features = ["derive"] }
 ron = "0.8.0"
 #again, custom version to get .length() in glsl
 naga = {git = "https://github.com/gfx-rs/naga.git"}
-

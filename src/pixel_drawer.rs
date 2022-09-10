@@ -440,6 +440,14 @@ impl PixelRenderer {
             color_buffers.push(buffer);
         }
 
+        let look_at = cgmath::Matrix4::look_to_lh(
+            cgmath::Point3::from_vec(world.camera.position),
+            world.camera.look_direction,
+            world.camera.up_direction,
+        );
+
+        dbg!(&look_at);
+
         let mut initial_ray_buffer = vec![0.0f32; 8 * total_pixel_count as usize];
         for pixel_idx in 0..total_pixel_count {
             let pixel_pos = (
@@ -447,13 +455,18 @@ impl PixelRenderer {
                 pixel_idx / screen_size.0 as u64,
             );
             let pixel_pos = (
-                (pixel_pos.0 as f32 / screen_size.0 as f32 - 0.5) * 2.0,
-                -(pixel_pos.1 as f32 / screen_size.1 as f32 - 0.5) * 2.0,
+                (pixel_pos.0 as f64 / screen_size.0 as f64 - 0.5) * 2.0,
+                -(pixel_pos.1 as f64 / screen_size.1 as f64 - 0.5) * 2.0,
             );
-            let final_vec = cgmath::vec3(pixel_pos.0, pixel_pos.1, 1.0).normalize();
-            initial_ray_buffer[pixel_idx as usize * 8 + 4] = final_vec.x;
-            initial_ray_buffer[pixel_idx as usize * 8 + 5] = final_vec.y;
-            initial_ray_buffer[pixel_idx as usize * 8 + 6] = final_vec.z;
+            let pixel_pos = (
+                (world.camera.fov_x / 2.0).to_radians().tan() * pixel_pos.0,
+                (world.camera.fov_x / 2.0).to_radians().tan() * pixel_pos.1,
+            );
+            let final_vec = cgmath::vec3(-pixel_pos.0, -pixel_pos.1, 1.0).normalize();
+            let final_vec = look_at.transform_vector(final_vec);
+            initial_ray_buffer[pixel_idx as usize * 8 + 4] = final_vec.x as f32;
+            initial_ray_buffer[pixel_idx as usize * 8 + 5] = final_vec.y as f32;
+            initial_ray_buffer[pixel_idx as usize * 8 + 6] = final_vec.z as f32;
         }
         queue.write_buffer(
             &ray_buffers[0],

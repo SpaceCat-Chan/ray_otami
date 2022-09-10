@@ -5,6 +5,10 @@
         y: 0.808,
         z: 0.98
     ),
+    camera: (
+        position: (x: 0, y: 0, z: 0),
+        look_direction: (x: 0, y: 0, z: 1),
+    ),
     objects: [
         Box(
             lower_corner: (x: -11.0, y: -11.0, z: 0.0),

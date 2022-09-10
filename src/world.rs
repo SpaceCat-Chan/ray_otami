@@ -67,4 +67,25 @@ pub struct World {
     pub sky_color: cgmath::Vector3<f64>,
     pub objects: Vec<Object>,
     pub materials: HashMap<String, Material>,
+    pub camera: Camera,
+}
+
+fn default_up() -> cgmath::Vector3<f64> {
+    cgmath::vec3(0.0, -1.0, 0.0)
+}
+
+fn default_fov() -> f64 {
+    90.0
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Camera {
+    pub position: cgmath::Vector3<f64>,
+    pub look_direction: cgmath::Vector3<f64>,
+    #[serde(default = "default_up")]
+    pub up_direction: cgmath::Vector3<f64>,
+    #[serde(default = "default_fov")]
+    pub fov_y: f64,
+    #[serde(default = "default_fov")]
+    pub fov_x: f64,
 }

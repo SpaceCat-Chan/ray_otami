@@ -1,6 +1,6 @@
 #version 440 core
 
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 // copy pasted needed parts from marcher.comp
 // they should always have the same interface
@@ -93,7 +93,7 @@ float geometry_smith(vec3 normal, vec3 view, vec3 light, float roughness) {
 vec4 skybox_color = vec4(0,0,0,1);
 
 void main() {
-    uint curr_index = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
+    uint curr_index = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_LocalInvocationID.x * gl_NumWorkGroups.x * gl_NumWorkGroups.y;
     HitResult hit = hit_results[curr_index];
     if(hit.object == 0) {
         in_color[curr_index] = skybox_color;

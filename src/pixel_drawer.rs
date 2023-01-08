@@ -816,7 +816,7 @@ impl PixelRenderer {
                     recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
                 pass.set_pipeline(&self.marcher_pipeline);
                 pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-                pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
+                pass.dispatch_workgroups(self.screen_size.0 / 16, self.screen_size.1 / 16, 1);
             }
             march_recorders.push(recorder.finish());
         }
@@ -830,7 +830,7 @@ impl PixelRenderer {
                     recorder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
                 pass.set_pipeline(&self.painter_pipeline);
                 pass.set_bind_group(0, &self.marcher_painter_bind_groups[index], &[]);
-                pass.dispatch_workgroups(self.screen_size.0, self.screen_size.1, 1);
+                pass.dispatch_workgroups(self.screen_size.0 / 16, self.screen_size.1 / 16, 1);
             }
             color_recorders.push(recorder.finish());
         }

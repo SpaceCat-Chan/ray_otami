@@ -119,9 +119,7 @@ fn runner() -> color_eyre::Result<()> {
             println!("new exposure: {}", exposure)
         }
         winit::event::Event::MainEventsCleared => {
-            *control = winit::event_loop::ControlFlow::WaitUntil(
-                std::time::Instant::now().add(std::time::Duration::from_secs_f64(0.25)),
-            );
+            control.set_poll();
             let texture = surface.get_current_texture().unwrap();
             renderer.render(
                 &texture.texture.create_view(&wgpu::TextureViewDescriptor {

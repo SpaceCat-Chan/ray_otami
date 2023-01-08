@@ -84,6 +84,9 @@ fn runner() -> color_eyre::Result<()> {
 
     let mut exposure = 1.0;
 
+    let mut average_frame_times = 0.0;
+    let mut last_time = std::time::Instant::now();
+
     event_loop.run(move |event, _, control| match event {
         winit::event::Event::WindowEvent {
             event: winit::event::WindowEvent::CloseRequested,
@@ -136,6 +139,17 @@ fn runner() -> color_eyre::Result<()> {
                 exposure,
             );
             texture.present();
+            let time = std::time::Instant::now();
+            let this_time = (time - last_time).as_secs_f64();
+            average_frame_times = this_time * 0.05 + average_frame_times * 0.95;
+            last_time = time;
+            println!(
+                "frametime: {} ({} fps)\nthis frame: {} ({} fps)",
+                average_frame_times,
+                1.0 / average_frame_times,
+                this_time,
+                1.0 / this_time,
+            )
         }
         _ => {}
     });

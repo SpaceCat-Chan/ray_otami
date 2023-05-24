@@ -2,13 +2,7 @@ mod error_extra;
 mod pixel_drawer;
 mod world;
 
-use std::{
-    ops::Add,
-    sync::{Arc, Mutex},
-};
-
 use error_extra::*;
-use wgpu::util::DeviceExt;
 use winit::event::MouseScrollDelta;
 
 fn main() {
@@ -42,8 +36,11 @@ fn runner() -> color_eyre::Result<()> {
         .with_title("hi there")
         .build(&event_loop)?;
 
-    let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
-    let surface = unsafe { instance.create_surface(&window) };
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(), // was: wgpu::Backends::PRIMARY
+        dx12_shader_compiler: wgpu::Dx12Compiler::Fxc,
+    });
+    let surface = unsafe { instance.create_surface(&window) }?;
     let adaptor =
         futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -57,7 +54,7 @@ fn runner() -> color_eyre::Result<()> {
             label: Some("the gpu, dumbass"),
             features: wgpu::Features::empty(),
             limits: wgpu::Limits {
-                max_dynamic_storage_buffers_per_pipeline_layout: 8,
+                max_dynamic_storage_buffers_per_pipeline_layout: 4,
                 max_storage_buffers_per_shader_stage: 8,
                 ..wgpu::Limits::downlevel_defaults()
             },
@@ -66,21 +63,31 @@ fn runner() -> color_eyre::Result<()> {
     ))?;
 
     let winit::dpi::PhysicalSize { width, height } = window.inner_size();
-    let preffered_surface_format = *surface
-        .get_supported_formats(&adaptor)
+
+    let prefered_surface_format = *surface
+        .get_capabilities(&adaptor)
+        .formats
         .first()
-        .ok_or("failed to get preffered_surface_format")
+        .ok_or("failed to get prefered_surface_format")
         .wrap_error()?;
     let surface_config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: preffered_surface_format,
+        format: prefered_surface_format,
         width,
         height,
         present_mode: wgpu::PresentMode::AutoNoVsync,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        view_formats: vec![prefered_surface_format],
     };
     surface.configure(&device, &surface_config);
 
-    let mut renderer = pixel_drawer::PixelRenderer::new(&world, (width, height), &device, &queue);
+    let mut renderer = pixel_drawer::PixelRenderer::new(
+        &world,
+        (width, height),
+        &device,
+        &queue,
+        prefered_surface_format,
+    );
 
     let mut exposure = 1.0;
 
@@ -124,7 +131,7 @@ fn runner() -> color_eyre::Result<()> {
             renderer.render(
                 &texture.texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some("texture view for current frame"),
-                    format: Some(preffered_surface_format),
+                    format: Some(prefered_surface_format),
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     aspect: wgpu::TextureAspect::All,
                     base_mip_level: 0,

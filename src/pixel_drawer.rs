@@ -224,7 +224,6 @@ struct RawMaterial {
 
 // TODO(SpaceCat~Chan): move World to other file
 pub struct PixelRenderer {
-    objects_buffer: wgpu::Buffer,
     materials_buffer: wgpu::Buffer,
 
     render_depth: usize,
@@ -258,13 +257,24 @@ impl PixelRenderer {
         screen_size: (u32, u32),
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        screen_format: wgpu::TextureFormat,
     ) -> Self {
         let render_depth = world.max_ray_depth as usize;
+
+        let (shader_function, materials) = world.create_shader_function();
+
+        let final_shader = format!(
+            "#version 440 core\n{}\n{}",
+            shader_function,
+            include_str!("marcher.comp")
+        );
+
+        println!("{}", final_shader);
 
         let marcher_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("marcher shader"),
             source: wgpu::ShaderSource::Glsl {
-                shader: Cow::Borrowed(include_str!("marcher.comp")),
+                shader: Cow::Owned(final_shader),
                 stage: naga::ShaderStage::Compute,
                 defines: HashMap::default(),
             },
@@ -282,16 +292,6 @@ impl PixelRenderer {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("marcher and painter bind group layout"),
                 entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -377,18 +377,13 @@ impl PixelRenderer {
 
         let total_pixel_count = screen_size.0 as u64 * screen_size.1 as u64;
 
-        let (objects, materials) = world_to_raw(world);
+        let materials = materials
+            .into_iter()
+            .map(|mat| material_to_raw(&mat))
+            .collect::<Vec<_>>();
         // TODO(SpaceCat~Chan): use create_buffer_init to fill these
         // with the actual data from "world" immediatly
-        let objects_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("object buffer"),
-            // 12 floats,
-            // vec4 mrrt
-            // vec4 args1
-            // vec4 args2
-            contents: bytemuck::cast_slice(&objects[..]),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        });
+
         let materials_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("material buffer"),
             // 12 floats,
@@ -509,14 +504,6 @@ impl PixelRenderer {
                 label: None,
                 layout: &marcher_painter_bind_layout,
                 entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &objects_buffer,
-                            offset: 0,
-                            size: None,
-                        }),
-                    },
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -723,7 +710,7 @@ impl PixelRenderer {
                 module: &collector_fragment_shader_module,
                 entry_point: "main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    format: screen_format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -763,7 +750,6 @@ impl PixelRenderer {
         });
 
         Self {
-            objects_buffer,
             materials_buffer,
             render_depth,
             screen_size,

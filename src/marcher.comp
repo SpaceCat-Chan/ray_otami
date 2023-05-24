@@ -1,4 +1,3 @@
-#version 440 core
 
 struct Object {
     // x = material id
@@ -29,9 +28,6 @@ struct Material {
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, binding = 1) readonly buffer objects_buf {
-    Object objects[];
-};
 
 layout(std430, binding = 2) readonly buffer materials_buf {
     Material materials[];
@@ -76,146 +72,6 @@ layout(binding = 7) uniform rand_deep_buf {uint rand_deep;};
 
 // 8 and 9 used for colors
 
-// lets hope no one needs more
-const uint MAX_OBJECTS_REFERED_TO = 8;
-
-uint cur_refer_index = 0;
-float refer_buffer[MAX_OBJECTS_REFERED_TO];
-uint refer_material_buffer[MAX_OBJECTS_REFERED_TO];
-
-
-// i just want my damn multiple return values
-uint material_return;
-
-const uint SPHERE_ID = 0;
-float sdf_sphere(Object self, vec3 position) {
-    material_return = self.mrrt.x;
-    vec3 sphere_position = self.args1.xyz;
-    float dist = distance(sphere_position, position);
-    return dist - self.args1.a;
-}
-
-const uint BOX_ID = 1;
-float sdf_box(Object self, vec3 position) {
-    material_return = self.mrrt.x;
-    vec3 lower_corner = self.args1.xyz;
-    vec3 upper_corner = self.args2.xyz;
-    vec3 center = (lower_corner + upper_corner) / 2.0;
-    vec3 b = center - lower_corner;
-
-    vec3 q = abs(center - position) - b;
-    float dist = distance(max(q, vec3(0.0,0.0,0.0)), vec3(0.0,0.0,0.0));
-    return dist + min(max(max(q.x,q.y),q.z),0.0);
-}
-
-// ummmm, can't really make this... lack of recursion...
-const uint POS_MODULO_ID = 2;
-float sdf_pos_modulo(Object self, vec3 position) {
-    return 1e10;
-}
-
-const uint INV_ID = 3;
-float sdf_inv(Object self, vec3 position) {
-    float sdf = refer_buffer[uint(self.args1.x)];
-    material_return = refer_material_buffer[uint(self.args1.x)];
-    return -sdf;
-}
-
-const uint MAX_ID = 4;
-float sdf_max(Object self, vec3 position) {
-    float a1 = refer_buffer[uint(self.args1.x)];
-    float a2 = refer_buffer[uint(self.args1.y)];
-    if (a1 > a2) {
-        material_return = refer_material_buffer[uint(self.args1.x)];
-        return a1;
-    } else {
-        material_return = refer_material_buffer[uint(self.args1.y)];
-        return a2;
-    }
-}
-
-const uint MIN_ID = 5;
-float sdf_min(Object self, vec3 position) {
-    float a1 = refer_buffer[uint(self.args1.x)];
-    float a2 = refer_buffer[uint(self.args1.y)];
-    if (a1 < a2) {
-        material_return = refer_material_buffer[uint(self.args1.x)];
-        return a1;
-    } else {
-        material_return = refer_material_buffer[uint(self.args1.y)];
-        return a2;
-    }
-}
-
-const uint TORUS_ID = 6;
-float sdf_torus(Object self, vec3 position) {
-    material_return = self.mrrt.x;
-    vec3 point = self.args1.xyz - position;
-    vec3 move_by = point;
-    move_by.y = 0;
-    if (move_by == vec3(0.0,0.0,0.0)) {
-        move_by = vec3(1.0,0.0,0.0);
-    }
-    move_by = self.args1.a * normalize(move_by);
-    point -= move_by;
-
-    return length(point) - self.args2.x;
-}
-
-float sdf_single(Object self, vec3 position) {
-    float dist = 0.0;
-    switch (uint(self.mrrt.a)) {
-        case SPHERE_ID:
-            dist = sdf_sphere(self, position);
-            break;
-        case BOX_ID:
-            dist = sdf_box(self, position);
-            break;
-        case POS_MODULO_ID:
-            dist = sdf_pos_modulo(self, position);
-            break;
-        case INV_ID:
-            dist = sdf_inv(self, position);
-            break;
-        case MAX_ID:
-            dist = sdf_max(self, position);
-            break;
-        case MIN_ID:
-            dist = sdf_min(self, position);
-            break;
-        case TORUS_ID:
-            dist = sdf_torus(self, position);
-            break;
-        default:
-            // invalid id, not good
-            dist = 1e10;
-            break;
-    }
-    if(self.mrrt.y != 0) {
-        refer_buffer[cur_refer_index] = dist;
-        refer_material_buffer[cur_refer_index] = material_return;
-        cur_refer_index++;
-    }
-    return dist;
-}
-
-// x = distance, y = object index, z = material index
-vec3 sdf(vec3 position) {
-    cur_refer_index = 0;
-    float min_dist = 1e9;
-    uint min_index = 0;
-    uint min_mat_index;
-    for(uint cur=0; cur < objects.length(); cur++) {
-        float dist = sdf_single(objects[cur], position);
-        if(objects[cur].mrrt.z != 0 && dist < min_dist) {
-            min_dist = dist;
-            min_index = cur;
-            min_mat_index = material_return;
-        }
-    }
-    return vec3(min_dist,float(min_index),float(min_mat_index));
-}
-
 const uint MAX_MARCH = 200;
 const float DISTANCE_CUTOFF = 1e-3;
 const float MAX_DISTANCE = 1000;
@@ -227,16 +83,15 @@ vec3 continue_march_from = vec3(0.0,0.0,0.0);
 uvec2 march(vec3 position, vec3 direction) {
     float total_distance = 0.0;
     for(uint counter=0; counter<MAX_MARCH; counter++) {
-        vec3 ret = sdf(position);
+        vec2 ret = sdf(position);
         float dist = ret.x;
         total_distance += dist;
-        uint hit = uint(ret.y);
         if(total_distance > MAX_DISTANCE) {
             return uvec2(0,0);
         }
         if(dist < DISTANCE_CUTOFF) {
         final_march_position = position;
-            return uvec2(hit + 1, uint(ret.z));
+            return uvec2(1, uint(ret.y));
         }
         continue_march_from = position;
         position += direction * dist;
@@ -395,7 +250,6 @@ void main() {
         };
         out_rays[curr_index] = error;
     } else {
-        uint object = hit_result.x - 1;
         vec3 hit_pos = final_march_position;
         vec3 normal = find_normal(hit_pos);
         HitResult hit_result_obj = {

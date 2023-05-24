@@ -135,8 +135,10 @@ void main() {
     vec3 k_d = vec3(1) - f;
     k_d *= (1 - mat.mrpx.x);
     vec3 final_color = ((k_d * mat.color.xyz / PI) + specular)
-        * out_color[curr_index].xyz
         * max(dot(hit.normal.xyz, out_going.direction.xyz), 0)
+        
+        // ABOVE CAN BE PRECALCULATED
+        * out_color[curr_index].xyz
         + mat.emitance.xyz;
     in_color[curr_index] = vec4(final_color, 1);
 }

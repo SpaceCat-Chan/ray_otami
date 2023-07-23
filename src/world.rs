@@ -49,6 +49,12 @@ pub enum Object {
         upper_corner: cgmath::Point3<f64>,
         material: String,
     },
+    Cylinder {
+        center: cgmath::Point3<f64>,
+        height: f64,
+        radius: f64,
+        material: String,
+    },
     PosModulo(Box<Object>, f64),
     Inv(Box<Object>),
     Min(Box<Object>, Box<Object>),
@@ -230,6 +236,24 @@ impl Object {
                     upper_corner.z
                 );
                 return (string, material_return, dist_return);
+            }
+            Object::Cylinder { center, height, radius, material } => {
+                let material_return = identifier_generator.gen("material");
+                let dist_return = identifier_generator.gen("distance");
+                let cyl_center = identifier_generator.gen("center");
+
+                let d = identifier_generator.gen("d");
+
+                let string = format!(
+                    "
+                    uint {material_return} = {};
+                    vec3 {cyl_center} = vec3({},{},{}) - position;
+
+                    vec2 {d} = abs(vec2(length({cyl_center}.xz),{cyl_center}.y)) - vec2({},{});
+                    float {dist_return} = min(max({d}.x,{d}.y),0.0) + length(max({d},0.0));
+                    ", material_to_index[material], center.x, center.y, center.z, radius, height
+                );
+                return (string, material_return, dist_return)
             }
             Object::PosModulo(_, _) => todo!(),
             Object::Inv(subobject) => {
